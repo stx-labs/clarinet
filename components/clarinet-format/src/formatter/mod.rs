@@ -418,11 +418,15 @@ impl<'a> Aggregator<'a> {
         list: &'a [PreSymbolicExpression],
         indent: &Indent,
     ) -> String {
+        // `(let)` or `(match)` while it's being typed still parses, and the
+        // editor formats it; their layouts index the arguments, so without
+        // any they are laid out as a plain call.
+        let has_args = list.len() > 1;
         if let Some(native) = NativeFunctions::lookup_by_name(atom_name) {
             match native {
-                NativeFunctions::Let => self.format_let(list, indent),
+                NativeFunctions::Let if has_args => self.format_let(list, indent),
                 NativeFunctions::Begin => self.format_begin(list, indent),
-                NativeFunctions::Match => self.format_match(list, indent),
+                NativeFunctions::Match if has_args => self.format_match(list, indent),
                 NativeFunctions::TupleCons => {
                     if let Some(formatted) = self.format_key_value(&list[1..], indent) {
                         formatted
@@ -433,7 +437,9 @@ impl<'a> Aggregator<'a> {
                 NativeFunctions::If => self.format_if(list, indent),
                 NativeFunctions::And | NativeFunctions::Or => self.format_booleans(list, indent),
                 NativeFunctions::ListCons => self.format_list(list, indent),
-                NativeFunctions::RestrictAssets => self.format_restrict_assets(list, indent),
+                NativeFunctions::RestrictAssets if has_args => {
+                    self.format_restrict_assets(list, indent)
+                }
                 _ => self.format_inner_content(list, indent),
             }
         } else if let Some(define) = DefineFunctions::lookup_by_name(atom_name) {
@@ -447,7 +453,8 @@ impl<'a> Aggregator<'a> {
                 | DefineFunctions::ImplTrait
                 | DefineFunctions::UseTrait
                 | DefineFunctions::NonFungibleToken => self.format_constant(list, indent),
-                DefineFunctions::Map => self.format_map(list, indent),
+                DefineFunctions::Map if has_args => self.format_map(list, indent),
+                DefineFunctions::Map => self.format_inner_content(list, indent),
                 DefineFunctions::Trait => self.define_trait(expr, list, indent),
             }
         } else {
@@ -2952,6 +2959,15 @@ mod tests_formatter {
                 format_valid_and_stable(constructor),
                 format_valid_and_stable(sugar)
             );
+        }
+    }
+
+    #[test]
+    fn test_forms_without_arguments() {
+        // Half-typed code the editor still formats, by file and by selection
+        for src in ["(let)", "(match)", "(define-map)", "(restrict-assets?)"] {
+            assert_eq!(format_valid_and_stable(src).trim_end(), src);
+            assert_eq!(format_with_default(src).trim_end(), src);
         }
     }
 
