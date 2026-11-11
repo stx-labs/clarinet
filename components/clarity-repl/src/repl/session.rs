@@ -397,6 +397,23 @@ impl Session {
         (reload, output)
     }
 
+    /// One console input run outside the interactive prompt, for
+    /// `clarinet console -e`: `Ok` with what to print, or `Err` with the
+    /// error output when a snippet fails. `::` commands report their own
+    /// problems in their output, so they are always `Ok`.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn eval_console_input(&mut self, input: &str) -> Result<Vec<String>, Vec<String>> {
+        if input.starts_with("::") {
+            let (_, output) = self.process_console_input(input);
+            return Ok(output);
+        }
+        let mut output = vec![];
+        match self.run_snippet(&mut output, self.show_costs, input) {
+            Ok(_) => Ok(output),
+            Err(_) => Err(output),
+        }
+    }
+
     pub fn handle_command(&mut self, command: &str) -> String {
         match command {
             "::help" => self.display_help(),
@@ -2111,6 +2128,20 @@ mod tests {
         assert_eq!(
             res.result,
             Value::some(Value::string_ascii_from_bytes(b"stack".to_vec()).unwrap()).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_eval_console_input() {
+        let mut session = Session::new(SessionSettings::default());
+        assert_eq!(
+            session.eval_console_input("(+ 1 2)"),
+            Ok(vec!["3".to_string()])
+        );
+        assert!(session.eval_console_input("(+ 1 u1)").is_err());
+        assert_eq!(
+            session.eval_console_input("::get_epoch"),
+            Ok(vec!["Current epoch: 2.05".to_string()])
         );
     }
 
