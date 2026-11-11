@@ -10,6 +10,9 @@
 # larger. The opt-level stays at the default 3: "s" made the Wasm ~30%
 # smaller but slowed contract calls by 15-40%.
 lto = "fat"
+# Lets LLVM optimize each crate as a whole: the Wasm is ~3% smaller and
+# CPU-heavy contract code 3-5% faster, but the CI build takes ~35 s longer.
+codegen-units = 1
 
 # Optimize for size the crates that only run at startup (manifest, deployment
 # plan, YAML and TOML parsing) or that only validate names (regex). Together they
