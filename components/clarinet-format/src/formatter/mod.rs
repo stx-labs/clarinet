@@ -988,7 +988,10 @@ impl<'a> Aggregator<'a> {
         let mut estimated_len = prefix_len;
         let empty = Indent::empty();
         for item in &exprs[start_index..] {
-            let display = self.display_pse(item, &empty);
+            // Measured as format_list prints it: `(tuple ...)` counted as a
+            // plain list but prints as the shorter `{ ... }`, so a second run
+            // over the sugar laid the list out differently.
+            let display = self.format_source_exprs(slice::from_ref(item), &empty);
             estimated_len += display.len() + 1; // display + space
         }
         estimated_len + 1 // closing paren
@@ -2946,6 +2949,13 @@ mod tests_formatter {
             (
                 "(define-constant X (tuple (a u1)))",
                 "(define-constant X { a: u1 })",
+            ),
+            // Long enough that the constructor's own spelling would overflow
+            // the line where the sugar fits, so the list must be measured as
+            // it prints.
+            (
+                "(define-read-only (f)\n  (begin\n    (list (tuple (a x) ;; TODO: x\n      (b none)) (let ((a x) (b none)) true))\n    u1))",
+                "(define-read-only (f)\n  (begin\n    (list { a: x, ;; TODO: x\n      b: none } (let ((a x) (b none)) true))\n    u1))",
             ),
         ] {
             assert_eq!(
