@@ -238,6 +238,10 @@ impl DevnetOrchestrator {
             .expect("checked in DevnetOrchestrator::new")
     }
 
+    pub fn stacks_api_container_name(&self) -> String {
+        format!("stacks-api.{}", self.network_name)
+    }
+
     async fn pull_image(&self, image_url: &str, platform: String) -> Result<(), String> {
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
         docker
@@ -1232,7 +1236,7 @@ impl DevnetOrchestrator {
         let docker = self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
         let devnet_config = self.devnet_config();
         let options = CreateContainerOptions {
-            name: format!("stacks-api.{}", self.network_name),
+            name: self.stacks_api_container_name(),
             platform: devnet_config.docker_platform.clone(),
         };
 
@@ -1357,11 +1361,10 @@ impl DevnetOrchestrator {
                 });
 
                 // Copy the events file to the container
-                let container_name = format!("stacks-api.{}", self.network_name);
+                let container_name = self.stacks_api_container_name();
                 let copy_command = format!(
-                    "docker cp {} {}:/tmp/events_cache.tsv",
-                    events_path.display(),
-                    container_name
+                    "docker cp {} {container_name}:/tmp/events_cache.tsv",
+                    events_path.display()
                 );
                 let output =
                     run_docker_command(&copy_command, devnet_config.docker_host.as_deref())
@@ -2244,17 +2247,40 @@ mod tests {
     use super::*;
 
     fn test_orchestrator() -> (tempfile::TempDir, DevnetOrchestrator) {
+        test_orchestrator_with_devnet_settings("")
+    }
+
+    fn test_orchestrator_with_devnet_settings(
+        extra_settings: &str,
+    ) -> (tempfile::TempDir, DevnetOrchestrator) {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         fs::create_dir_all(root.join("settings")).unwrap();
         fs::write(root.join("Clarinet.toml"), "[project]\nname = \"test\"\n").unwrap();
         let working_dir = root.join("devnet").display().to_string();
-        let devnet_settings =
-            format!("[network]\nname = \"devnet\"\n\n[devnet]\nworking_dir = {working_dir:?}\n");
+        let devnet_settings = format!(
+            "[network]\nname = \"devnet\"\n\n[devnet]\nworking_dir = {working_dir:?}\n{extra_settings}"
+        );
         fs::write(root.join("settings").join("Devnet.toml"), devnet_settings).unwrap();
         let manifest = ProjectManifest::from_location(&root.join("Clarinet.toml"), false).unwrap();
         let orchestrator = DevnetOrchestrator::new(manifest, false).unwrap();
         (dir, orchestrator)
+    }
+
+    #[test]
+    fn stacks_api_container_name_follows_the_network_name() {
+        let (_root, orchestrator) = test_orchestrator();
+        assert_eq!(
+            orchestrator.stacks_api_container_name(),
+            "stacks-api.test.devnet"
+        );
+
+        let (_root, orchestrator) =
+            test_orchestrator_with_devnet_settings("network_id = 7\nname = \"alt\"\n");
+        assert_eq!(
+            orchestrator.stacks_api_container_name(),
+            "stacks-api.test.7.alt"
+        );
     }
 
     #[test]
