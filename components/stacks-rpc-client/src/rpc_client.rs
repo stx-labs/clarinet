@@ -302,7 +302,7 @@ impl StacksRpc {
     }
 }
 
-#[cfg(all(test, feature = "mock"))]
+#[cfg(test)]
 mod tests {
     use super::{RpcError, StacksRpc};
     use crate::crypto::build_contract_publish_transaction;
