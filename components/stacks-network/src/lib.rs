@@ -157,7 +157,7 @@ pub fn do_run_local_devnet(
         deployment,
         &ctx,
         ip_address_setup,
-        devnet.docker_client.clone(),
+        devnet.docker()?.clone(),
     );
 
     let chains_coordinator_tx = devnet_events_tx.clone();

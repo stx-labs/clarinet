@@ -12,14 +12,11 @@ use futures::TryStreamExt;
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 pub fn formatted_docker_error(message: &str, error: DockerError) -> String {
-    let error = match &error {
-        DockerError::DockerResponseServerError {
-            status_code: _c,
-            message: m,
-        } => m.to_string(),
+    let detail = match &error {
+        DockerError::DockerResponseServerError { message, .. } => message.clone(),
         _ => format!("{error:?}"),
     };
-    format!("{message}: {error}")
+    format!("{message}: {detail}")
 }
 
 /// Archives the contents of `src_dir` under a top-level directory named `root`.
@@ -171,21 +168,18 @@ pub async fn exec_in_container(
         .create_exec(container, options)
         .await
         .map_err(|e| formatted_docker_error(&format!("unable to create exec in {container}"), e))?;
-    let StartExecResults::Attached { mut output, .. } = docker
+    let StartExecResults::Attached { output, .. } = docker
         .start_exec(&exec.id, None)
         .await
         .map_err(|e| formatted_docker_error(&format!("unable to start exec in {container}"), e))?
     else {
         return Err(format!("exec in {container} was detached"));
     };
-    let mut stderr = Vec::new();
-    while let Some(log) = output
-        .try_next()
+    let stderr: Vec<u8> = output
+        .map_ok(|log| log.into_bytes().to_vec())
+        .try_concat()
         .await
-        .map_err(|e| formatted_docker_error("unable to read exec output", e))?
-    {
-        stderr.extend_from_slice(&log.into_bytes());
-    }
+        .map_err(|e| formatted_docker_error("unable to read exec output", e))?;
     let exit_code = docker
         .inspect_exec(&exec.id)
         .await

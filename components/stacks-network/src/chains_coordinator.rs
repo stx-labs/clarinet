@@ -53,7 +53,7 @@ use crate::docker_files::{copy_file_from_container, exec_in_container};
 use crate::event::{send_status_update, DevnetEvent, Status};
 use crate::orchestrator::{
     copy_directory, get_global_snapshot_dir, get_project_snapshot_dir, ServicesMapHosts,
-    DEVNET_SNAPSHOT_READY_MARKER, DOCKER_ERR_MSG, EXCLUDED_STACKS_SNAPSHOT_FILES,
+    DEVNET_SNAPSHOT_READY_MARKER, EXCLUDED_STACKS_SNAPSHOT_FILES, STACKS_API_EVENTS_FILE,
 };
 use crate::snapshot_extractor::SnapshotImages;
 
@@ -80,7 +80,7 @@ pub struct DevnetEventObserverConfig {
     pub deployment_fee_rate: u64,
     pub services_map_hosts: ServicesMapHosts,
     pub network_manifest: NetworkManifest,
-    pub docker_client: Option<Docker>,
+    pub docker_client: Docker,
 }
 
 impl DevnetEventObserverConfig {
@@ -123,7 +123,7 @@ impl DevnetEventObserverConfig {
         deployment: DeploymentSpecification,
         ctx: &Context,
         services_map_hosts: ServicesMapHosts,
-        docker_client: Option<Docker>,
+        docker_client: Docker,
     ) -> Self {
         ctx.try_log(|logger| slog::info!(logger, "Checking contracts"));
         let event_observer_config = EventObserverConfig {
@@ -1598,7 +1598,7 @@ async fn export_stacks_api_events(
         "Exporting Stacks API events...".to_string(),
     ));
 
-    let docker = config.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)?;
+    let docker = &config.docker_client;
     exec_in_container(
         docker,
         &container_name,
@@ -1607,7 +1607,7 @@ async fn export_stacks_api_events(
             "/app/lib/index.js",
             "export-events",
             "--file",
-            "/tmp/events_cache.tsv",
+            STACKS_API_EVENTS_FILE,
             "--overwrite-file",
         ],
     )
@@ -1621,7 +1621,7 @@ async fn export_stacks_api_events(
     copy_file_from_container(
         docker,
         &container_name,
-        "/tmp/events_cache.tsv",
+        STACKS_API_EVENTS_FILE,
         &export_path.join("events_cache.tsv"),
     )
     .await

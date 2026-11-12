@@ -42,7 +42,8 @@ use crate::snapshot_extractor::SnapshotImages;
 
 const BITCOIND_DATA_DIR: &str = "/home/bitcoin/.bitcoin";
 
-pub(crate) const DOCKER_ERR_MSG: &str = "unable to get docker client";
+const DOCKER_ERR_MSG: &str = "unable to get docker client";
+pub(crate) const STACKS_API_EVENTS_FILE: &str = "/tmp/events_cache.tsv";
 
 #[derive(Serialize)]
 struct StacksNodeEventObserversConfig<'a> {
@@ -117,7 +118,7 @@ pub struct DevnetOrchestrator {
     bitcoin_node_container_id: Option<String>,
     bitcoin_explorer_container_id: Option<String>,
     postgres_container_id: Option<String>,
-    pub(crate) docker_client: Option<Docker>,
+    docker_client: Option<Docker>,
     services_map_hosts: Option<ServicesMapHosts>,
     save_container_logs: bool,
     container_index: Cell<u32>,
@@ -238,6 +239,10 @@ impl DevnetOrchestrator {
             .devnet
             .as_ref()
             .expect("checked in DevnetOrchestrator::new")
+    }
+
+    pub(crate) fn docker(&self) -> Result<&Docker, &'static str> {
+        self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)
     }
 
     async fn pull_image(&self, image_url: &str, platform: String) -> Result<(), String> {
@@ -1356,7 +1361,7 @@ impl DevnetOrchestrator {
                     slog::info!(logger, "Importing events from {}", events_path.display())
                 });
 
-                copy_file_to_container(docker, container, &events_path, "/tmp/events_cache.tsv")
+                copy_file_to_container(docker, container, &events_path, STACKS_API_EVENTS_FILE)
                     .await
                     .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
 
@@ -1368,7 +1373,7 @@ impl DevnetOrchestrator {
                         "/app/lib/index.js",
                         "import-events",
                         "--file",
-                        "/tmp/events_cache.tsv",
+                        STACKS_API_EVENTS_FILE,
                         "--wipe-db",
                     ],
                 )
