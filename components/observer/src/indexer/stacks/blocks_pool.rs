@@ -881,8 +881,7 @@ impl StacksBlockPool {
         {
             if divergence.block_ids_to_rollback.is_empty() {
                 let mut new_blocks = vec![];
-                for i in 0..divergence.block_ids_to_apply.len() {
-                    let block_identifier = &divergence.block_ids_to_apply[i];
+                for block_identifier in &divergence.block_ids_to_apply {
                     let block = match self.block_store.get(block_identifier) {
                         Some(block) => block.clone(),
                         None => {
@@ -1052,9 +1051,11 @@ impl StacksBlockPool {
         {
             if divergence.block_ids_to_rollback.is_empty() {
                 let mut new_microblocks = vec![];
-                for i in 0..divergence.block_ids_to_apply.len() {
-                    let block_identifier = &new_canonical_segment.block_ids[i];
-
+                for block_identifier in new_canonical_segment
+                    .block_ids
+                    .iter()
+                    .take(divergence.block_ids_to_apply.len())
+                {
                     let microblock_identifier =
                         (anchor_block_identifier.clone(), block_identifier.clone());
                     let block = match self.microblock_store.get(&microblock_identifier) {
