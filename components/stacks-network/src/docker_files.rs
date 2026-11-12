@@ -11,6 +11,9 @@ use futures::TryStreamExt;
 /// The daemon answers an upload only once the archive is extracted.
 const UPLOAD_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
+/// A tar archive with no entries: its two zero end-of-archive blocks.
+const EMPTY_ARCHIVE: [u8; 1024] = [0; 1024];
+
 pub fn formatted_docker_error(message: &str, error: DockerError) -> String {
     let detail = match &error {
         DockerError::DockerResponseServerError { message, .. } => message.clone(),
@@ -99,21 +102,22 @@ pub async fn copy_dir_to_container(
     src_dir: &Path,
     dest: &str,
 ) -> Result<(), String> {
-    // A `.` root merges into an existing `dest` and leaves its own metadata alone
-    let archive = archive_directory(src_dir, ".").await?;
-    let uploaded = match upload(docker, container, dest, archive).await {
-        // `dest` is missing: create it from `src_dir`
+    let upload_error = |e: DockerError| {
+        formatted_docker_error(&format!("unable to upload to {container}:{dest}"), e)
+    };
+    // Uploading nothing checks that `dest` exists, as `docker cp` stats it first
+    let (dir, root) = match upload(docker, container, dest, EMPTY_ARCHIVE.to_vec()).await {
+        // A `.` root merges into `dest` and leaves its own metadata alone
+        Ok(()) => (dest, "."),
         Err(DockerError::DockerResponseServerError {
             status_code: 404, ..
-        }) => {
-            let (dir, root) = split_dest(dest)?;
-            let archive = archive_directory(src_dir, root).await?;
-            upload(docker, container, dir, archive).await
-        }
-        uploaded => uploaded,
+        }) => split_dest(dest)?,
+        Err(e) => return Err(upload_error(e)),
     };
-    uploaded
-        .map_err(|e| formatted_docker_error(&format!("unable to upload to {container}:{dest}"), e))
+    let archive = archive_directory(src_dir, root).await?;
+    upload(docker, container, dir, archive)
+        .await
+        .map_err(upload_error)
 }
 
 /// Same as `docker cp {src} {container}:{dest}`.
@@ -258,6 +262,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let archive = tar_directory(dir.path(), "tmp").unwrap();
         assert!(untar_file(&archive, &dir.path().join("out")).is_err());
+    }
+
+    #[test]
+    fn empty_archive_is_a_finished_tar_without_entries() {
+        let archive = tar::Builder::new(Vec::new()).into_inner().unwrap();
+        assert_eq!(archive, EMPTY_ARCHIVE);
     }
 
     #[test]
