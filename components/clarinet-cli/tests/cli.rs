@@ -585,6 +585,43 @@ fn test_check_project_standard_output_shows_lint_warnings() {
     );
 }
 
+#[test]
+fn test_check_project_standard_output_shows_notes_without_warnings() {
+    let project_name = "test_std_note_output";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "my-contract"])
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "clarinet contract new failed");
+
+    let contract_path = project_path.join("contracts").join("my-contract.clar");
+    fs::write(&contract_path, "(define-read-only (getValue) u42)\n")
+        .expect("Failed to write contract");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["check"])
+        .env("NO_COLOR", "1")
+        .current_dir(&project_path)
+        .output()
+        .expect("Failed to execute clarinet check");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+
+    assert!(output.status.success(), "clarinet check failed:\n{stdout}");
+    assert!(
+        !stdout.contains("warning"),
+        "expected no warnings in standard output, got:\n{stdout}"
+    );
+    assert!(
+        stdout.contains("note") && stdout.contains("getValue"),
+        "expected style note in standard output, got:\n{stdout}"
+    );
+}
+
 /// Create a project with one contract that both trips a lint and is rejected by
 /// `call_checker`, and return its path.
 fn create_project_with_rejected_contract(

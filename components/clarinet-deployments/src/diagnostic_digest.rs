@@ -75,6 +75,6 @@ impl DiagnosticsDigest {
     }
 
     pub fn has_feedbacks(&self) -> bool {
-        self.errors > 0 || self.warnings > 0
+        !self.message.is_empty()
     }
 }
