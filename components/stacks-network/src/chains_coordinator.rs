@@ -654,12 +654,7 @@ fn should_publish_stacking_orders(
     }
 
     let offset = (current_cycle + duration).saturating_sub(*start_at_cycle);
-    let should_stack = (offset % duration) == (duration - 1);
-    if !should_stack {
-        return false;
-    }
-
-    true
+    (offset % duration) == (duration - 1)
 }
 
 fn remove_global_snapshot(

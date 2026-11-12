@@ -1175,7 +1175,7 @@ pub fn main() {
                             use_mainnet_wallets: false,
                         };
                         let mut settings = repl::SessionSettings::default();
-                        settings.repl_settings.remote_data = remote_data_settings.clone();
+                        settings.repl_settings.remote_data = remote_data_settings;
                         Terminal::new(settings)
                     }
                 };

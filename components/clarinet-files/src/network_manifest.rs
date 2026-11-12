@@ -538,7 +538,7 @@ impl NetworkManifest {
                         account_name.to_string(),
                         AccountConfig {
                             label: account_name.to_string(),
-                            mnemonic: mnemonic.to_string(),
+                            mnemonic,
                             encrypted_mnemonic,
                             derivation,
                             balance,
