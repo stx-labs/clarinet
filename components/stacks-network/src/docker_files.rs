@@ -279,4 +279,107 @@ mod tests {
         assert_eq!(split_dest("/devnet").unwrap(), ("/", "devnet"));
         assert!(split_dest("/").is_err());
     }
+
+    /// Answers the three calls of an exec. mockito can't stream output over an upgraded
+    /// connection, so this speaks raw HTTP.
+    async fn fake_daemon(
+        create_status: u16,
+        stderr_frames: &'static [&'static [u8]],
+        exit_code: i64,
+    ) -> Docker {
+        use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
+
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        tokio::spawn(async move {
+            while let Ok((stream, _)) = listener.accept().await {
+                tokio::spawn(async move {
+                    let mut stream = BufReader::new(stream);
+                    loop {
+                        let mut request_line = String::new();
+                        if stream.read_line(&mut request_line).await.unwrap_or(0) == 0 {
+                            return;
+                        }
+                        let mut content_length = 0;
+                        loop {
+                            let mut header = String::new();
+                            stream.read_line(&mut header).await.unwrap();
+                            if header == "\r\n" {
+                                break;
+                            }
+                            if let Some(len) = header.to_lowercase().strip_prefix("content-length:")
+                            {
+                                content_length = len.trim().parse().unwrap();
+                            }
+                        }
+                        stream
+                            .read_exact(&mut vec![0; content_length])
+                            .await
+                            .unwrap();
+
+                        let path = request_line
+                            .split(' ')
+                            .nth(1)
+                            .unwrap()
+                            .split('?')
+                            .next()
+                            .unwrap();
+                        let (status, body) = if path.ends_with("/start") {
+                            let mut upgraded = b"HTTP/1.1 101 UPGRADED\r\nContent-Type: application/vnd.docker.raw-stream\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n".to_vec();
+                            for frame in stderr_frames {
+                                upgraded.extend_from_slice(&[2, 0, 0, 0]);
+                                upgraded.extend_from_slice(&(frame.len() as u32).to_be_bytes());
+                                upgraded.extend_from_slice(frame);
+                            }
+                            stream.write_all(&upgraded).await.unwrap();
+                            return;
+                        } else if path.ends_with("/json") {
+                            (
+                                200,
+                                format!(r#"{{"ExitCode":{exit_code},"Running":false}}"#),
+                            )
+                        } else if create_status == 201 {
+                            (201, r#"{"Id":"e1"}"#.to_string())
+                        } else {
+                            (
+                                create_status,
+                                r#"{"message":"No such container: c"}"#.to_string(),
+                            )
+                        };
+                        let response = format!(
+                            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n{body}",
+                            body.len()
+                        );
+                        stream.write_all(response.as_bytes()).await.unwrap();
+                    }
+                });
+            }
+        });
+        Docker::connect_with_http(&url, 5, bollard::API_DEFAULT_VERSION).unwrap()
+    }
+
+    #[tokio::test]
+    async fn exec_succeeds_on_a_zero_exit() {
+        let docker = fake_daemon(201, &[b"warning only\n"], 0).await;
+        assert_eq!(exec_in_container(&docker, "c", &["true"]).await, Ok(()));
+    }
+
+    #[tokio::test]
+    async fn exec_fails_with_stderr_on_a_nonzero_exit() {
+        // A character split across two frames still decodes
+        let docker = fake_daemon(201, &[b"caf\xc3", b"\xa9 failed\n"], 1).await;
+        assert_eq!(
+            exec_in_container(&docker, "c", &["false"]).await,
+            Err("café failed\n".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn exec_reports_docker_api_errors() {
+        let docker = fake_daemon(404, &[], 0).await;
+        assert_eq!(
+            exec_in_container(&docker, "c", &["true"]).await,
+            Err("unable to create exec in c: No such container: c".to_string())
+        );
+    }
 }
