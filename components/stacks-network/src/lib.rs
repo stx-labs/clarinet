@@ -1,6 +1,6 @@
 mod bitcoin_rpc_client;
 pub mod chains_coordinator;
-mod command;
+mod docker_files;
 mod event;
 pub mod event_logger;
 mod log;
@@ -157,6 +157,7 @@ pub fn do_run_local_devnet(
         deployment,
         &ctx,
         ip_address_setup,
+        devnet.docker()?.clone(),
         devnet.stacks_api_container_name(),
     );
 

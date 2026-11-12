@@ -34,13 +34,16 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::bitcoin_rpc_client::BitcoinRpcClient;
-use crate::command::run_docker_command;
+use crate::docker_files::{
+    copy_dir_to_container, copy_file_to_container, exec_in_container, formatted_docker_error,
+};
 use crate::event::{send_status_update, DevnetEvent, Status};
 use crate::snapshot_extractor::SnapshotImages;
 
 const BITCOIND_DATA_DIR: &str = "/home/bitcoin/.bitcoin";
 
 const DOCKER_ERR_MSG: &str = "unable to get docker client";
+pub(crate) const STACKS_API_EVENTS_FILE: &str = "/tmp/events_cache.tsv";
 
 #[derive(Serialize)]
 struct StacksNodeEventObserversConfig<'a> {
@@ -236,6 +239,10 @@ impl DevnetOrchestrator {
             .devnet
             .as_ref()
             .expect("checked in DevnetOrchestrator::new")
+    }
+
+    pub(crate) fn docker(&self) -> Result<&Docker, &'static str> {
+        self.docker_client.as_ref().ok_or(DOCKER_ERR_MSG)
     }
 
     pub fn stacks_api_container_name(&self) -> String {
@@ -815,15 +822,14 @@ impl DevnetOrchestrator {
             let bitcoin_snapshot = get_global_snapshot_dir(devnet_config)
                 .join("bitcoin")
                 .join("regtest");
-            let docker_host = devnet_config.docker_host.as_deref();
 
             copy_snapshot_to_container(
+                docker,
                 container,
                 &bitcoin_snapshot,
                 &format!("{BITCOIND_DATA_DIR}/regtest"),
                 devnet_event_tx,
                 "Bitcoin",
-                docker_host,
             )
             .await?;
         }
@@ -1081,15 +1087,14 @@ impl DevnetOrchestrator {
         if !no_snapshot {
             let devnet_config = self.devnet_config();
             let stacks_snapshot = get_global_snapshot_dir(devnet_config).join("stacks");
-            let docker_host = devnet_config.docker_host.as_deref();
 
             copy_snapshot_to_container(
+                docker,
                 container,
                 &stacks_snapshot,
                 "/devnet",
                 devnet_event_tx,
                 "Stacks",
-                docker_host,
             )
             .await?;
         }
@@ -1360,43 +1365,31 @@ impl DevnetOrchestrator {
                     slog::info!(logger, "Importing events from {}", events_path.display())
                 });
 
-                // Copy the events file to the container
-                let container_name = self.stacks_api_container_name();
-                let copy_command = format!(
-                    "docker cp {} {container_name}:/tmp/events_cache.tsv",
-                    events_path.display()
-                );
-                let output =
-                    run_docker_command(&copy_command, devnet_config.docker_host.as_deref())
-                        .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
+                copy_file_to_container(docker, container, &events_path, STACKS_API_EVENTS_FILE)
+                    .await
+                    .map_err(|e| format!("Failed to copy events file to container: {e}"))?;
 
-                if !output.status.success() {
-                    return Err(format!(
-                        "Copy command failed: {}",
-                        String::from_utf8_lossy(&output.stderr)
-                    ));
-                }
+                let imported = exec_in_container(
+                    docker,
+                    container,
+                    &[
+                        "node",
+                        "/app/lib/index.js",
+                        "import-events",
+                        "--file",
+                        STACKS_API_EVENTS_FILE,
+                        "--wipe-db",
+                    ],
+                )
+                .await;
 
-                // Run the import command
-                let import_command = format!(
-                    "docker exec {container_name} node /app/lib/index.js import-events --file /tmp/events_cache.tsv --wipe-db"
-                );
-                let output =
-                    run_docker_command(&import_command, devnet_config.docker_host.as_deref())
-                        .map_err(|e| format!("Failed to import events: {e}"))?;
-
-                if !output.status.success() {
-                    ctx.try_log(|logger| {
-                        slog::warn!(
-                            logger,
-                            "Events import failed: {}",
-                            String::from_utf8_lossy(&output.stderr)
-                        )
-                    });
-                } else {
-                    ctx.try_log(|logger| {
+                match imported {
+                    Ok(()) => ctx.try_log(|logger| {
                         slog::info!(logger, "Events import completed successfully")
-                    });
+                    }),
+                    Err(e) => {
+                        ctx.try_log(|logger| slog::warn!(logger, "Events import failed: {e}"))
+                    }
                 }
             }
         }
@@ -2130,17 +2123,6 @@ async fn register_descriptor(
         .await
 }
 
-fn formatted_docker_error(message: &str, error: DockerError) -> String {
-    let error = match &error {
-        DockerError::DockerResponseServerError {
-            status_code: _c,
-            message: m,
-        } => m.to_string(),
-        _ => format!("{error:?}"),
-    };
-    format!("{message}: {error}")
-}
-
 pub fn get_snapshot_cache_root() -> PathBuf {
     let home_dir = dirs::home_dir().expect("Unable to retrieve home dir");
     home_dir.join(".clarinet").join("cache").join("devnet")
@@ -2203,12 +2185,12 @@ pub fn copy_directory(
 }
 
 pub async fn copy_snapshot_to_container(
+    docker: &Docker,
     container_id: &str,
     source_path: &Path,
     dest_path: &str,
     devnet_event_tx: &Sender<DevnetEvent>,
     service_name: &str,
-    docker_host: Option<&str>,
 ) -> Result<(), String> {
     if !source_path.exists() {
         return Ok(()); // No snapshot to copy
@@ -2218,20 +2200,9 @@ pub async fn copy_snapshot_to_container(
         "Copying {service_name} snapshot to container..."
     )));
 
-    // `src/.` copies the contents and creates `dest_path` if it is missing (no bind mount)
-    let copy_command = format!(
-        "docker cp {}/. {container_id}:{dest_path}",
-        source_path.display()
-    );
-    let output = run_docker_command(&copy_command, docker_host)
-        .map_err(|e| format!("Failed to execute docker cp: {e}"))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "docker cp failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
+    copy_dir_to_container(docker, container_id, source_path, dest_path)
+        .await
+        .map_err(|e| format!("Failed to copy {service_name} snapshot: {e}"))?;
 
     let _ = devnet_event_tx.send(DevnetEvent::success(format!(
         "{service_name} snapshot copied to container successfully"
