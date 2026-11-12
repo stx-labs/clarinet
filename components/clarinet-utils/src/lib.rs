@@ -628,7 +628,7 @@ mod tests {
                 }
             }
 
-            let mut bad_bs58 = encrypted.clone();
+            let mut bad_bs58 = encrypted;
             bad_bs58.push('?');
             assert!(matches!(
                 decrypt_mnemonic_phrase(&bad_bs58, TEST_PASSWORD, strength),

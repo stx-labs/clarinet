@@ -60,7 +60,7 @@ impl StacksBlockPool {
             slog::info!(logger, "Seeding block pool with {} blocks", blocks.len())
         });
         for block in blocks.into_iter() {
-            let existing_entry = self.block_store.get(&block.block_identifier.clone());
+            let existing_entry = self.block_store.get(&block.block_identifier);
             if existing_entry.is_some() {
                 ctx.try_log(|logger| {
                     slog::info!(
