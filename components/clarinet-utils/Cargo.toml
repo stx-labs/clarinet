@@ -6,10 +6,10 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-aes-gcm.workspace = true
-argon2.workspace = true
-bip39 = "3.0.0"
-bip32 = { version = "0.6.0", features = ["alloc"] }
+aes-gcm = { workspace = true, features = ["aes", "alloc"] }
+argon2 = { workspace = true, features = ["alloc"] }
+bip32 = { workspace = true, features = ["alloc"] }
+bip39.workspace = true
 bs58.workspace = true
 rand.workspace = true
 strum = { workspace = true, features = ["derive"] }
