@@ -33,7 +33,7 @@ mod format_benches {
         bencher.bench_local(|| {
             for file_path in &files {
                 let source = fs::read_to_string(file_path).expect("Failed to read test file");
-                black_box(formatter.format(black_box(&source), None));
+                black_box(formatter.format(black_box(&source), None).unwrap());
             }
         });
     }
@@ -45,7 +45,7 @@ mod format_benches {
         let source = fs::read_to_string("tests/golden/clarity-bitcoin.clar")
             .expect("Failed to read test file");
 
-        bencher.bench_local(|| black_box(formatter.format(black_box(&source), None)));
+        bencher.bench_local(|| black_box(formatter.format(black_box(&source), None).unwrap()));
     }
 }
 
@@ -55,7 +55,7 @@ fn utf8_literals(bencher: Bencher, count: usize) {
         .map(|i| format!("(define-constant c{i} u\"abc\")\n"))
         .collect();
     let formatter = ClarityFormatter::new(Settings::default());
-    bencher.bench_local(|| black_box(formatter.format(black_box(&source), None)));
+    bencher.bench_local(|| black_box(formatter.format(black_box(&source), None).unwrap()));
 }
 
 #[divan::bench(args = [500, 1000, 2000, 4000])]
@@ -64,7 +64,7 @@ fn ignored_blocks(bencher: Bencher, count: usize) {
         .map(|i| format!(";; @format-ignore\n(define-constant c{i}   (+ 1  2))\n"))
         .collect();
     let formatter = ClarityFormatter::new(Settings::default());
-    bencher.bench_local(|| black_box(formatter.format(black_box(&source), None)));
+    bencher.bench_local(|| black_box(formatter.format(black_box(&source), None).unwrap()));
 }
 
 #[divan::bench(args = [500, 1000, 2000, 4000])]
@@ -73,7 +73,7 @@ fn ascii_literals(bencher: Bencher, count: usize) {
         .map(|i| format!("(define-constant c{i} \"abc\")\n"))
         .collect();
     let formatter = ClarityFormatter::new(Settings::default());
-    bencher.bench_local(|| black_box(formatter.format(black_box(&source), None)));
+    bencher.bench_local(|| black_box(formatter.format(black_box(&source), None).unwrap()));
 }
 
 fn main() {

@@ -489,7 +489,12 @@ pub fn process_request(
             };
 
             let formatter = clarinet_format::formatter::ClarityFormatter::new(formatting_options);
-            let formatted_result = formatter.format_file(source, Some(contract_data.epoch));
+            // A document that doesn't parse, mid-edit or with a non-ASCII
+            // character, gets no edits, as range formatting does.
+            let Ok(formatted_result) = formatter.format_file(source, Some(contract_data.epoch))
+            else {
+                return Ok(LspRequestResponse::DocumentFormatting(None));
+            };
             let text_edit = ls_types::TextEdit {
                 range: ls_types::Range {
                     start: ls_types::Position {

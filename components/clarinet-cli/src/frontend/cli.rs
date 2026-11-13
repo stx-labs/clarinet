@@ -202,16 +202,14 @@ enum FormatterInputSource {
 }
 
 impl FormatterInputSource {
-    fn get_input(&self) -> String {
+    fn get_input(&self) -> io::Result<String> {
         match self {
-            FormatterInputSource::File(path, _) => {
-                fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read file: {e}"))
-            }
-            FormatterInputSource::Stdin => io::stdin()
+            FormatterInputSource::File(path, _) => fs::read_to_string(path),
+            FormatterInputSource::Stdin => Ok(io::stdin()
                 .lines()
                 .map_while(Result::ok)
                 .collect::<Vec<_>>()
-                .join("\n"),
+                .join("\n")),
         }
     }
 
@@ -1517,10 +1515,24 @@ pub fn main() {
 
             let mut all_files_formatted = true;
             let mut unformatted_files = Vec::new();
+            let mut failed_files = 0;
 
             for source in sources {
-                let input = source.get_input();
-                let output = formatter.format(&input, source.epoch());
+                // A contract that can't be read or doesn't parse is reported,
+                // and the rest are still formatted.
+                let formatted = source
+                    .get_input()
+                    .map_err(|e| e.to_string())
+                    .and_then(|input| Ok((formatter.format(&input, source.epoch())?, input)));
+                let (output, input) = match formatted {
+                    Ok(formatted) => formatted,
+                    Err(error) => {
+                        let name = source.file_path().unwrap_or("<stdin>");
+                        eprintln!("{} {name}: {error}", red!("✗"));
+                        failed_files += 1;
+                        continue;
+                    }
+                };
 
                 if cmd.check {
                     if let Some(file_path) = source.file_path() {
@@ -1542,8 +1554,19 @@ pub fn main() {
                 }
             }
 
+            if failed_files > 0 {
+                eprintln!(
+                    "{} {failed_files} {} could not be read or parsed",
+                    red!("✗"),
+                    if failed_files == 1 { "file" } else { "files" }
+                );
+            }
+
             if cmd.check {
                 if all_files_formatted {
+                    if failed_files > 0 {
+                        std::process::exit(1);
+                    }
                     println!("{} All files are properly formatted", green!("✔"));
                     std::process::exit(0);
                 } else {
@@ -1562,6 +1585,10 @@ pub fn main() {
                     }
                     std::process::exit(1);
                 }
+            }
+
+            if failed_files > 0 {
+                std::process::exit(1);
             }
         }
         Command::Devnet(subcommand) => match subcommand {
