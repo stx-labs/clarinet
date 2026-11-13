@@ -8,8 +8,8 @@ edition = "2021"
 [dependencies]
 aes-gcm.workspace = true
 argon2.workspace = true
-bip39 = "2.2.0"
-bip32 = "0.5.3"
+bip39 = "3.0.0"
+bip32 = { version = "0.6.0", features = ["alloc"] }
 bs58.workspace = true
 libsecp256k1.workspace = true
 rand.workspace = true

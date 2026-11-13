@@ -9,7 +9,7 @@ use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Error as AesGcmError, KeyInit, Nonce};
 use argon2::{Argon2, Error as Argon2Error};
 use bip32::{DerivationPath, XPrv};
-use bip39::{Error as MnemonicError, Language, Mnemonic};
+use bip39::{Error as MnemonicError, Mnemonic};
 use libsecp256k1::{PublicKey, SecretKey};
 pub use precomputed::{
     DEFAULT_DEPLOYER_MNEMONIC, DEFAULT_DERIVATION_PATH, DEFAULT_DEVNET_ACCOUNTS,
@@ -63,13 +63,12 @@ impl fmt::Display for MnemonicEncryptionStrength {
 }
 
 pub fn mnemonic_from_phrase(phrase: &str) -> Result<Mnemonic, String> {
-    Mnemonic::parse_in(Language::English, phrase).map_err(|e| e.to_string())
+    Mnemonic::parse(phrase).map_err(|e| e.to_string())
 }
 
 pub fn random_mnemonic() -> Mnemonic {
-    let mut entropy = [0u8; 16]; // 16 bytes = 128 bits = 12 words
-    rand::rng().fill_bytes(&mut entropy);
-    Mnemonic::from_entropy_in(Language::English, &entropy).unwrap()
+    // 16 bytes = 128 bits = 12 words
+    Mnemonic::from_entropy(&rand::random::<[u8; 16]>()).unwrap()
 }
 
 /// The 32-byte secret key and its secp256k1 public key.
@@ -175,12 +174,11 @@ fn derive_bip32_keys(
     password: &str,
     derivation: &str,
 ) -> Result<DerivedKeys, String> {
-    let mnemonic = mnemonic_from_phrase(phrase)?;
-    let seed = mnemonic.to_seed(password);
+    let seed = mnemonic_from_phrase(phrase)?.to_seed(password);
     let derivation_path = DerivationPath::from_str(derivation).map_err(|e| e.to_string())?;
-    let xprv = XPrv::derive_from_path(seed, &derivation_path).map_err(|e| e.to_string())?;
-    let secret_bytes = xprv.private_key().to_bytes();
-    let secret_key = SecretKey::parse_slice(&secret_bytes).unwrap();
+    let xprv = XPrv::derive_from_path(&seed, &derivation_path).map_err(|e| e.to_string())?;
+    let secret_bytes = xprv.to_bytes();
+    let secret_key = SecretKey::parse(&secret_bytes).unwrap();
     let public_key = PublicKey::from_secret_key(&secret_key);
     Ok((secret_bytes.to_vec(), public_key))
 }
@@ -360,7 +358,7 @@ pub fn encrypt_mnemonic_phrase(
     password: &str,
     strength: MnemonicEncryptionStrength,
 ) -> Result<String, MnemonicEncryptionError> {
-    let _ = Mnemonic::parse_in(Language::English, phrase)?;
+    Mnemonic::parse(phrase)?;
     let ciphertext = encrypt(phrase.as_bytes(), password, strength)?;
     let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
     let decoded_ciphertext = bs58::decode(&encrypted_mnemonic).into_vec()?;
@@ -380,9 +378,8 @@ pub fn decrypt_mnemonic_phrase(
     let cipher = bs58::decode(encrypted_mnemonic).into_vec()?;
     let plain = decrypt(&cipher, password, strength)?;
     let phrase = str::from_utf8(&plain)?;
-    let mnemonic = Mnemonic::parse_in(Language::English, phrase)?;
 
-    Ok(mnemonic)
+    Ok(Mnemonic::parse(phrase)?)
 }
 
 #[cfg(test)]
