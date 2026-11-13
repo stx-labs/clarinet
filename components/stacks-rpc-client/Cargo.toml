@@ -19,6 +19,9 @@ clarinet-utils = { path = "../clarinet-utils" }
 # enable mock stacks rpc for tests
 mockito = { workspace = true, default-features = false, optional = true }
 
+[dev-dependencies]
+mockito = { workspace = true }
+
 [features]
 mock = ["mockito"]
 
