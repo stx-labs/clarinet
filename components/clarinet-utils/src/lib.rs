@@ -26,14 +26,24 @@ const SALT_SIZE: usize = 32;
 
 const DEFAULT_SALT: &[u8] = b"clarinet_utils-derive_key_salt";
 
+/// Declared weakest to strongest: [`Self::strongest_first`] relies on it.
 #[derive(Debug, Clone, Copy, PartialEq, Default, Display, EnumString, VariantArray)]
-#[strum(serialize_all = "lowercase", ascii_case_insensitive)]
+#[strum(
+    serialize_all = "lowercase",
+    ascii_case_insensitive,
+    parse_err_ty = String,
+    parse_err_fn = unknown_strength
+)]
 pub enum MnemonicEncryptionStrength {
     Basic,
     #[default]
     Medium,
     High,
     Extreme,
+}
+
+fn unknown_strength(s: &str) -> String {
+    format!("unknown encryption strength: {s}")
 }
 
 impl MnemonicEncryptionStrength {
@@ -100,8 +110,8 @@ static DERIVED_KEYS: LazyLock<Mutex<HashMap<CacheKey, DerivedKeys>>> =
 /// Bounds the map without being reachable by a real manifest. Sized well
 /// above any plausible account count on purpose: if the cap were close to it,
 /// a project declaring more wallets than the cap would evict and re-derive the
-/// overflow on *every* load, permanently — trading a bounded ~400 KB for
-/// hundreds of milliseconds. At this size an entry (~380 B) is only ever
+/// overflow on *every* load, permanently — trading a bounded ~300 KB for
+/// hundreds of milliseconds. At this size an entry (~300 B) is only ever
 /// evicted by the unrepeatable random phrases the cap exists for.
 const CACHE_LIMIT: usize = 1024;
 
@@ -329,7 +339,19 @@ mod tests {
             assert_eq!(name.parse(), Ok(strength));
             assert_eq!(name.to_uppercase().parse(), Ok(strength));
         }
-        assert!("strongest".parse::<MnemonicEncryptionStrength>().is_err());
+        assert_eq!(
+            "strongest".parse::<MnemonicEncryptionStrength>(),
+            Err("unknown encryption strength: strongest".to_string())
+        );
+    }
+
+    #[test]
+    fn test_strongest_first_order() {
+        use MnemonicEncryptionStrength::{Basic, Extreme, High, Medium};
+        assert_eq!(
+            MnemonicEncryptionStrength::strongest_first().collect::<Vec<_>>(),
+            [Extreme, High, Medium, Basic]
+        );
     }
 
     #[test]
