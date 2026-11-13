@@ -103,7 +103,7 @@ pub fn match_kebab_case(s: &str) -> Result<(), CaseError> {
 /// This should be called before case-checking so that `my-var_` is validated
 /// as `my-var` rather than failing on the underscore.
 pub fn strip_unused_suffix(s: &str) -> &str {
-    s.strip_suffix('_').unwrap_or(s)
+    s.trim_suffix('_')
 }
 
 /// Returns true if identifier matches our convention for explicity unused code

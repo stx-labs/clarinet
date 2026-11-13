@@ -372,7 +372,7 @@ impl<'a> Aggregator<'a> {
 
             if let Some(comment) = trailing_comment {
                 // A define ends with a newline, and the comment goes before it
-                result.push_str(formatted.strip_suffix('\n').unwrap_or(&formatted));
+                result.push_str(formatted.trim_suffix('\n'));
                 result.push(' ');
                 result.push_str(&self.display_pse(comment, indent));
                 result.push('\n');

@@ -355,7 +355,7 @@ impl<'de> Deserialize<'de> for TransactionSpecificationFile {
             yaml_serde::Value::Tagged(ref tagged) => {
                 // yaml_serde tag format: !variant-name { ... }
                 let tag_str = tagged.tag.to_string();
-                let variant = tag_str.strip_prefix('!').unwrap_or(&tag_str);
+                let variant = tag_str.trim_prefix('!');
                 deserialize_variant(variant, tagged.value.clone()).map_err(serde::de::Error::custom)
             }
             _ => Err(serde::de::Error::custom(
