@@ -2,7 +2,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
-use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork};
+use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork, DEFAULT_SBTC_BALANCE};
 use clarity::types::StacksEpochId;
 use clarity::util::hash::{hex_bytes, to_hex, Sha256Sum};
 use clarity::vm::analysis::ContractAnalysis;
@@ -1339,6 +1339,7 @@ pub struct WalletSpecificationFile {
     pub name: String,
     pub address: String,
     pub balance: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub sbtc_balance: Option<String>,
 }
 
@@ -1370,7 +1371,7 @@ impl GenesisSpecification {
                 name: wallet.name.to_string(),
                 address: wallet.address.to_string(),
                 balance: format!("{}", wallet.balance),
-                sbtc_balance: Some(format!("{}", wallet.sbtc_balance)),
+                sbtc_balance: wallet.sbtc_balance.map(|balance| balance.to_string()),
             })
         }
 
@@ -1379,6 +1380,13 @@ impl GenesisSpecification {
             contracts: self.contracts.clone(),
         }
     }
+
+    /// Whether any wallet explicitly asks for sBTC; the default balance doesn't count.
+    pub fn has_configured_sbtc_balance(&self) -> bool {
+        self.wallets
+            .iter()
+            .any(|wallet| wallet.sbtc_balance.is_some_and(|balance| balance > 0))
+    }
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -1386,7 +1394,9 @@ pub struct WalletSpecification {
     pub name: String,
     pub address: StandardPrincipalData,
     pub balance: u128,
-    pub sbtc_balance: u128,
+    /// `None` when the account doesn't set `sbtc_balance`; see
+    /// [`AccountConfig::sbtc_balance`](clarinet_files::AccountConfig::sbtc_balance).
+    pub sbtc_balance: Option<u128>,
 }
 
 impl WalletSpecification {
@@ -1407,9 +1417,9 @@ impl WalletSpecification {
 
         let sbtc_balance = specs
             .sbtc_balance
-            .clone()
-            .unwrap_or_else(|| "1000000000".to_string())
-            .parse::<u128>()
+            .as_deref()
+            .map(str::parse::<u128>)
+            .transpose()
             .map_err(|_| format!("unable to parse {}'s sbtc_balance as a u128", specs.name))?;
 
         Ok(WalletSpecification {
@@ -1418,6 +1428,11 @@ impl WalletSpecification {
             balance,
             sbtc_balance,
         })
+    }
+
+    pub fn sbtc_balance_or_default(&self) -> u128 {
+        self.sbtc_balance
+            .unwrap_or_else(|| DEFAULT_SBTC_BALANCE.into())
     }
 }
 

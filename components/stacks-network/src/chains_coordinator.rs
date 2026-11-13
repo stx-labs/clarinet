@@ -1073,7 +1073,7 @@ fn fund_accounts(
                 continue;
             }
         };
-        let configured = u128::from(account.sbtc_balance);
+        let configured = u128::from(account.sbtc_balance_or_default());
         let Some(shortfall) = configured.checked_sub(held).filter(|amount| *amount > 0) else {
             if held > configured {
                 let _ = devnet_event_tx.send(DevnetEvent::warning(format!(
@@ -1169,7 +1169,8 @@ fn sbtc_balance_of(
 fn genesis_deposit_id(purpose: &str, account: &AccountConfig) -> Vec<u8> {
     let seed = format!(
         "clarinet-devnet-{purpose}-{}-{}",
-        account.stx_address, account.sbtc_balance
+        account.stx_address,
+        account.sbtc_balance_or_default()
     );
     Sha256Sum::from_data(seed.as_bytes()).as_bytes().to_vec()
 }
@@ -1700,7 +1701,7 @@ mod test_rpc_client {
             encrypted_mnemonic: "".to_string(),
             derivation: DEFAULT_DERIVATION_PATH.to_string(),
             balance: 10000000,
-            sbtc_balance: 100000000,
+            sbtc_balance: Some(100000000),
             stx_address: TEST_DEPLOYER_ADDRESS.to_string(),
             btc_address: "mvZtbibDAAA3WLpY7zXXFqRa3T4XSknBX7".to_string(),
             is_mainnet: false,
@@ -1833,7 +1834,7 @@ mod test_rpc_client {
         let broadcast_mock = stacks_rpc.get_tx_mock("0xdeadbeef").expect(0);
 
         let account = AccountConfig {
-            sbtc_balance: 0,
+            sbtc_balance: Some(0),
             ..test_deployer()
         };
         let (devnet_event_tx, devnet_event_rx) = channel();
