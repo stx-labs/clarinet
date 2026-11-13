@@ -331,6 +331,17 @@ mod tests {
         bytes.iter().map(|b| format!("{b:02x}")).collect()
     }
 
+    const TEST_PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
+    const TEST_PASSWORD: &str = "foo";
+
+    // `TEST_PHRASE` encrypted with `TEST_PASSWORD`, generated with argon2 0.5 and
+    // aes-gcm 0.10. Do not regenerate: values like these sit in users' settings
+    // and must keep decrypting.
+    const ENCRYPTED_BASIC: &str = "3F94JMNFn3dNyBonXFFJS8AgfeNHUrc7eLWVjV2nAcMvPGniWVEaCZFwzWEw1S4ADgMNxwhJtsL65WSihP1KNyPd85SEAHZ1LV8pRUjP6YVBoBkK1JSZn23j2xMJYvCWJa5Chp6cn9gV9chzXjxtHgBxffkete83xJgkPy9t98fybsw3ovcKGJdXY4EHZvQLCryMNHJvhaoQJB1i7qF1f3pAotJQ5drjSsd4p8rtsd63ZH4sg";
+    const ENCRYPTED_MEDIUM: &str = "asRVpd5MFXwJY7CbBsZjRAmb4vGeidfh12pfNzGzcJiazb5bWPoC3EvERfoxmE7JGTemsYxJWmDMUfdtr9FsbUDfBREiFANxe37Ep9TR9FEBhWnHGoeHF4jCUthBwVBLPcZeYCeSj6GBMnVnk9RzCe1b7Ry65wcz6YiPhhm9KmFVcAc8T7fDXuPe47kxJLgZ3oXazvnk41gTsSgv6GT2kChGHCkE1ShQbLQrEkYfyxRBNnQBXb8TLZiK7VQr1pc42t57CbrPm4xjc2db1PiLjszVWr3m";
+    const ENCRYPTED_HIGH: &str = "sHvMdDwsEPBXoQKJc7GtfQvSiXL8Yfqrogwky43QzeQmaFXSw4TbKsjAQnuSEz8QfmA2wrq7sQGNViMH6Jqx9Jbew87PFDUipx6D9CZW23iJf5256co814JQowjsvXUpfP5rNZ38N5tMvLLWgzoJ4fmuSmfFVTQaNtqDFpUjdHGNQKq4qF2bR4k7eYpC2RDL5CpftYjuM8DDKbNubLjeAXFix1VXeVLQQ8hm8yCjxM9uLB4dth74Xzs7XoTdXDrsTVndeaj3kUHte23vPj3tjdu6A4gx";
+    const ENCRYPTED_EXTREME: &str = "xyfrPwqmDJSSWfKEnTDt7CirmyKNjAGaqoFXZHGmjjoxagFN6giToMVTTYWGoctxhKx3apKm47V4C6vVhfupnaJaxpfiST378YxPoj2TQpJzaS1DZvLrxugYQGvcrY8wKvMBZymm56Da5wujeJ86sM6odeRe197vbr3Jp59gPA9LUdbj2VnGkqc8pxLkCxJqyfVdT5x8tXXW5QnQnRyZETDLisR31fAmYNKogZjmG3U9m2vpyEGoR5fwXDHiSEyWcvjUMhrG6EL9AnxTNcqWCVcvoPT9";
+
     #[test]
     fn test_encryption_strength_parses_case_insensitively() {
         for &strength in MnemonicEncryptionStrength::VARIANTS {
@@ -507,8 +518,6 @@ mod tests {
 
     #[test]
     fn test_encrypt_mnemonic() {
-        const TEST_PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
-        const TEST_PASSWORD: &str = "foo";
         for strength in [
             MnemonicEncryptionStrength::Basic,
             MnemonicEncryptionStrength::Medium,
@@ -538,10 +547,33 @@ mod tests {
         }
     }
 
+    #[track_caller]
+    fn assert_decrypts(strength: MnemonicEncryptionStrength, encrypted: &str) {
+        let decrypted = decrypt_mnemonic_phrase(encrypted, TEST_PASSWORD, strength)
+            .unwrap_or_else(|e| panic!("{strength} should decrypt: {e:?}"));
+        assert_eq!(TEST_PHRASE, decrypted);
+    }
+
+    #[test]
+    fn test_decrypts_existing_ciphertexts() {
+        assert_decrypts(MnemonicEncryptionStrength::Basic, ENCRYPTED_BASIC);
+        assert_decrypts(MnemonicEncryptionStrength::Medium, ENCRYPTED_MEDIUM);
+    }
+
+    #[test]
+    fn test_decrypts_existing_high_ciphertext() {
+        assert_decrypts(MnemonicEncryptionStrength::High, ENCRYPTED_HIGH);
+    }
+
+    #[test]
+    #[ignore = "needs 2 GiB of memory and over ten seconds"]
+    fn test_decrypts_existing_extreme_ciphertext() {
+        assert_decrypts(MnemonicEncryptionStrength::Extreme, ENCRYPTED_EXTREME);
+    }
+
     #[test]
     fn test_encrypt_mnemonic_invalid_phrase() {
         let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
-        const TEST_PASSWORD: &str = "foo";
         assert!(matches!(
             encrypt_mnemonic_phrase(bad_phrase, TEST_PASSWORD, MnemonicEncryptionStrength::Basic),
             Err(MnemonicEncryptionError::Mnemonic(_))
