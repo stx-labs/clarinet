@@ -82,6 +82,13 @@ type ProxyBindings<ContractOptions> = {
   ) => unknown;
 };
 
+const released = new WeakSet<object>();
+
+/** Whether `free` or `Symbol.dispose` was called on this simnet. */
+export function isReleased(simnet: object): boolean {
+  return released.has(simnet);
+}
+
 export function createSessionProxy<S extends ProxySdk, ContractOptions>(
   bindings: ProxyBindings<ContractOptions>,
 ): ProxyHandler<S> {
@@ -214,7 +221,11 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
       // only matches the SDK itself: freed through the Proxy, the finalizer
       // would later free the same pointer again.
       if (prop === "free" || prop === Symbol.dispose) {
-        return () => sdk.free();
+        return () => {
+          if (released.has(receiver)) return;
+          sdk.free();
+          released.add(receiver);
+        };
       }
 
       return Reflect.get(session, prop, receiver);

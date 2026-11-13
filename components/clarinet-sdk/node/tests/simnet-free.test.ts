@@ -33,6 +33,23 @@ describe("releasing a simnet", () => {
     expect(unregister).toHaveReturnedWith(true);
   });
 
+  it.each(["free", Symbol.dispose] as const)("ignores a second release on %s", async (method) => {
+    const simnet = await initSimnet(manifestPath, true);
+    simnet.free();
+
+    expect(() => simnet[method]()).not.toThrow();
+  });
+
+  it("does not hand back a freed simnet from the cache", async () => {
+    const freed = await initSimnet(manifestPath, true);
+    freed.free();
+
+    const simnet = await initSimnet(manifestPath);
+
+    expect(simnet).not.toBe(freed);
+    expect(simnet.blockHeight).toBe(3);
+  });
+
   it("keeps the newest simnet usable after freeing the replaced ones", async () => {
     let simnet = await initSimnet(manifestPath, true);
 

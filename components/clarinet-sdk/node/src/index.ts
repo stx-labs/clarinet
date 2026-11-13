@@ -14,6 +14,7 @@ export {
 
 import type { SDK } from "@stacks/clarinet-sdk-wasm";
 
+import { isReleased } from "../../common/src/sdkProxy.js";
 import { vfs } from "./vfs.js";
 import { Simnet, getSessionProxy } from "./sdkProxy.js";
 import { connectSyncSocket } from "./syncDebugSocket.js";
@@ -96,7 +97,7 @@ function memoizedInit() {
       return debugSimnet as unknown as Simnet;
     }
 
-    if (noCache || !simnet) {
+    if (noCache || !simnet || isReleased(simnet)) {
       simnet = await getSDK(options);
     }
 
