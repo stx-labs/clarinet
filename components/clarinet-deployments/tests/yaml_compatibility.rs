@@ -4,10 +4,10 @@ use clarinet_deployments::types::{
     DeploymentSpecification, DeploymentSpecificationFile, EpochSpec, TransactionPlanSpecification,
     TransactionSpecificationFile,
 };
+use clarinet_deployments::yaml::{from_yaml, to_yaml};
 use clarinet_files::StacksNetwork;
 use indoc::{formatdoc, indoc};
 use serde_json::{json, Value};
-use yaml_serde::{from_slice as from_yaml, to_string as to_yaml};
 
 fn transactions() -> Vec<(&'static str, Value)> {
     vec![

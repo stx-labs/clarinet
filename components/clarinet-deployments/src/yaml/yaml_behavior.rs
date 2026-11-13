@@ -430,7 +430,6 @@ fn explicit_tags_require_the_matching_node_kind(input: &str) {
 #[test_case(""; "empty_value")]
 #[test_case("~"; "tilde_null")]
 #[test_case("null"; "null_word")]
-#[ignore = "requires the serde-saphyr transaction buffer migration"]
 fn null_is_not_a_call_parameter_sequence(parameters: &str) {
     let call = |parameters: &str| {
         formatdoc! {"
@@ -452,7 +451,6 @@ fn null_is_not_a_call_parameter_sequence(parameters: &str) {
 /// after which unknown fields are ignored. YAML 1.1 and 1.2 both allow scalar keys.
 #[test_case("1"; "integer_key")]
 #[test_case("true"; "boolean_key")]
-#[ignore = "requires the serde-saphyr transaction buffer migration"]
 fn transaction_buffer_converts_scalar_keys_to_strings(key: &str) {
     let input = formatdoc! {"
         transaction-type: btc-transfer
@@ -468,7 +466,6 @@ fn transaction_buffer_converts_scalar_keys_to_strings(key: &str) {
 /// Application policy: JSON buffering stringifies a numeric remap key before
 /// field deserialization. This tests loading, not later principal validation.
 #[test]
-#[ignore = "requires the serde-saphyr transaction buffer migration"]
 fn transaction_buffer_converts_integer_remap_keys_to_strings() {
     let input = indoc! {b"
         transaction-type: requirement-publish
@@ -602,9 +599,7 @@ fn deployment_diagnostics_point_to_the_transaction_mapping() {
               sats-amount: wrong
               sats-per-byte: 1
     "};
-    let error = from_yaml::<DeploymentSpecificationFile>(input.as_bytes())
-        .map_err(|msg| format!("unable to read file {msg}"))
-        .unwrap_err();
+    let error = DeploymentSpecificationFile::from_file_content(input).unwrap_err();
     assert!(
         error.starts_with("unable to read file error: line"),
         "{error}"

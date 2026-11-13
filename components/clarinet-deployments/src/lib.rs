@@ -7,9 +7,7 @@ pub mod onchain;
 pub mod requirements;
 pub mod source_remap;
 pub mod types;
-
-#[cfg(test)]
-mod yaml;
+pub mod yaml;
 
 use std::fmt;
 use std::path::{Path, PathBuf};

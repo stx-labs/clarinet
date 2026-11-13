@@ -94,7 +94,6 @@ toml_edit = "0.22"
 wasm-bindgen = { version = "0.2.108" }
 wasm-bindgen-futures = { version = "0.4.58" }
 web-sys = { version = "0.3.85" }
-yaml_serde = "0.10.3"
 
 # [patch.'https://github.com/stacks-network/stacks-core.git']
 # clarity = { path = "../stacks-core/clarity" }
@@ -107,6 +106,7 @@ yaml_serde = "0.10.3"
 [workspace.lints.clippy]
 clear_with_drain = "deny"
 collection_is_never_read = "deny"
+disallowed_methods = "deny"
 iter_on_empty_collections = "deny"
 iter_on_single_items = "deny"
 iter_with_drain = "deny"
