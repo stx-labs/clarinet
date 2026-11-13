@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 // test the built package and not the source code
 // makes it simpler to handle wasm build
-import { type Simnet, initSimnet } from "..";
+import { initSimnet } from "..";
 
 const manifestPath = "tests/fixtures/Clarinet.toml";
 
@@ -24,16 +24,13 @@ afterEach(() => {
 });
 
 describe("releasing a simnet", () => {
-  it.each([
-    ["free", (simnet: Simnet) => simnet.free()],
-    ["Symbol.dispose", (simnet: Simnet) => simnet[Symbol.dispose]()],
-  ])("unregisters the finalizer on %s", async (_name, release) => {
+  it.each(["free", Symbol.dispose] as const)("unregisters the finalizer on %s", async (method) => {
     const simnet = await initSimnet(manifestPath, true);
     const unregister = vi.spyOn(FinalizationRegistry.prototype, "unregister");
 
-    release(simnet);
+    simnet[method]();
 
-    expect(unregister.mock.results.map(({ value }) => value)).toContain(true);
+    expect(unregister).toHaveReturnedWith(true);
   });
 
   it("keeps the newest simnet usable after freeing the replaced ones", async () => {
