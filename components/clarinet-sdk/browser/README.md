@@ -20,9 +20,6 @@ You can use this SDK to:
 pnpm install @stacks/clarinet-sdk-browser
 ```
 
-The SDK runs on WebAssembly with SIMD. It requires Chrome or Edge 96, Firefox 89, Safari 16.4, or
-later.
-
 ### Usage
 
 There are two ways to use the sdk in the browser:
