@@ -1,0 +1,31 @@
+# Cargo release profile for the SDK Wasm build. build.mjs passes it to cargo with
+# `--config`. It can't go in this crate's Cargo.toml, because Cargo ignores
+# [profile.*] in workspace members, and the root Cargo.toml would also change the
+# CLI. Wasm SIMD is enabled in build.mjs instead, because CI's RUSTFLAGS would
+# override rustflags set here. Measured with
+# components/clarinet-sdk/node/benches/simnet.bench.mjs.
+#
+# Tried and left out, because with Rust 1.99 they made contract calls 2-4% slower
+# and the Wasm larger: fat LTO (which also adds ~50 s of CI build time), and
+# wasm-opt -O3 instead of -Oz (set in Cargo.toml).
+
+[profile.release]
+# Lets LLVM optimize each crate as a whole: the Wasm is ~9% smaller, with no
+# measurable change in speed, for ~12 s more CI build time.
+codegen-units = 1
+
+# Optimize the regex crates for size: the Wasm is ~1.4% smaller, with no
+# measurable slowdown. Clarity uses regex to validate contract, function and
+# field names (on every contract call), to parse string-utf8 escapes, and in the
+# Clarity 1 parser.
+[profile.release.package.regex]
+opt-level = "s"
+
+[profile.release.package.regex-automata]
+opt-level = "s"
+
+[profile.release.package.regex-syntax]
+opt-level = "s"
+
+[profile.release.package.aho-corasick]
+opt-level = "s"

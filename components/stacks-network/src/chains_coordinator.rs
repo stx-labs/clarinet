@@ -1708,7 +1708,7 @@ mod test_rpc_client {
 
     fn test_services_map_hosts(mock_url: &str) -> ServicesMapHosts {
         ServicesMapHosts {
-            stacks_api_host: mock_url.replace("http://", ""),
+            stacks_api_host: mock_url.trim_prefix("http://").to_string(),
             // only stacks_node is called
             stacks_node_host: mock_url.to_string(),
             bitcoin_node_host: "localhost".to_string(),

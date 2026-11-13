@@ -1928,8 +1928,7 @@ impl From<ParseIntError> for DecodeHexError {
 
 fn decode_hex(byte_string: &str) -> Result<Vec<u8>, DecodeHexError> {
     let byte_string_filtered: String = byte_string
-        .strip_prefix("0x")
-        .unwrap_or(byte_string)
+        .trim_prefix("0x")
         .chars()
         .filter(|c| !c.is_whitespace())
         .collect();
