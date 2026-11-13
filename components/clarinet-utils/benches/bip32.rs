@@ -65,8 +65,6 @@ fn memoized(bencher: divan::Bencher) {
 mod stages {
     use super::*;
 
-    /// `to_seed` already returns `[u8; 64]`, so no copy is needed to feed
-    /// `XPrv::derive_from_path`.
     fn seed_and_path() -> ([u8; 64], DerivationPath) {
         let mnemonic = mnemonic_from_phrase(DEFAULT_DEPLOYER_MNEMONIC).unwrap();
         (
@@ -84,14 +82,14 @@ mod stages {
     #[divan::bench]
     fn derive_path(bencher: divan::Bencher) {
         let (seed, path) = seed_and_path();
-        bencher.bench(|| XPrv::derive_from_path(black_box(seed), black_box(&path)).unwrap());
+        bencher.bench(|| XPrv::derive_from_path(black_box(&seed), black_box(&path)).unwrap());
     }
 
     #[divan::bench]
     fn public_key(bencher: divan::Bencher) {
         let (seed, path) = seed_and_path();
-        let xprv = XPrv::derive_from_path(seed, &path).unwrap();
-        let secret = SecretKey::parse_slice(&xprv.private_key().to_bytes()).unwrap();
+        let xprv = XPrv::derive_from_path(&seed, &path).unwrap();
+        let secret = SecretKey::parse(&xprv.to_bytes()).unwrap();
         bencher.bench(|| PublicKey::from_secret_key(black_box(&secret)));
     }
 
