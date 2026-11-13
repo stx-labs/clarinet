@@ -7,6 +7,7 @@ pub mod onchain;
 pub mod requirements;
 pub mod source_remap;
 pub mod types;
+pub mod yaml;
 
 use std::fmt;
 use std::path::{Path, PathBuf};

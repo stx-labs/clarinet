@@ -29,3 +29,19 @@ opt-level = "s"
 
 [profile.release.package.aho-corasick]
 opt-level = "s"
+
+# Prefer size for deployment YAML parsing and error reporting.
+[profile.release.package.serde-saphyr]
+opt-level = "s"
+
+[profile.release.package.granit-parser]
+opt-level = "s"
+
+[profile.release.package.annotate-snippets]
+opt-level = "s"
+
+[profile.release.package.encoding_rs_io]
+opt-level = "s"
+
+[profile.release.package.encoding_rs]
+opt-level = "s"
