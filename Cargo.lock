@@ -729,7 +729,6 @@ dependencies = [
  "clarity",
  "clarity-repl",
  "indoc",
- "libsecp256k1",
  "mockito",
  "pretty_assertions",
  "reqwest",
@@ -758,7 +757,6 @@ dependencies = [
  "dirs",
  "indoc",
  "js-sys",
- "libsecp256k1",
  "rpassword",
  "schemars 1.2.1",
  "serde",
@@ -814,8 +812,8 @@ dependencies = [
  "bip39",
  "bs58",
  "divan",
- "libsecp256k1",
  "rand 0.9.4",
+ "strum",
 ]
 
 [[package]]
@@ -4552,7 +4550,6 @@ version = "4.0.0"
 dependencies = [
  "clarinet-utils",
  "clarity",
- "libsecp256k1",
  "mockito",
  "reqwest",
  "serde",

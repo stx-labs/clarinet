@@ -2,7 +2,10 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
-use clarinet_utils::{get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_mnemonic};
+use clarinet_utils::{
+    decrypt_mnemonic_phrase, get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_mnemonic,
+    DerivedKeys, MnemonicEncryptionStrength,
+};
 pub use clarinet_utils::{
     DEFAULT_DERIVATION_PATH, DEFAULT_FAUCET_MNEMONIC, DEFAULT_STACKER_MNEMONIC,
     DEFAULT_STACKS_MINER_MNEMONIC,
@@ -11,7 +14,6 @@ use clarity::types::chainstate::{StacksAddress, StacksPrivateKey};
 use clarity::util::hash::bytes_to_hex;
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use clarity_repl::utils::Environment;
-use libsecp256k1::PublicKey;
 use serde::{Deserialize, Serialize};
 use toml::value::Value;
 
@@ -367,7 +369,6 @@ pub struct PoxStackingOrder {
 #[derive(Debug, Clone)]
 pub struct AccountConfig {
     pub label: String,
-    pub encrypted_mnemonic: String,
     pub mnemonic: String,
     pub derivation: String,
     pub balance: u64,
@@ -460,7 +461,7 @@ impl NetworkManifest {
 
                     let mut mnemonic = match account_settings.get("mnemonic") {
                         Some(Value::String(phrase)) => match mnemonic_from_phrase(phrase) {
-                            Ok(result) => result.to_string(),
+                            Ok(result) => result,
                             Err(e) => {
                                 return Err(format!(
                                         "mnemonic (located in ./settings/{:?}.toml) for deploying address is invalid: {}",
@@ -468,57 +469,23 @@ impl NetworkManifest {
                                     ));
                             }
                         },
-                        _ => random_mnemonic().to_string(),
+                        _ => random_mnemonic(),
                     };
 
-                    let (encrypted_mnemonic, encryption_strength) =
-                        if let Some(Value::String(cipher)) =
-                            account_settings.get("encrypted_mnemonic_extreme")
-                        {
-                            (
-                                cipher.clone(),
-                                clarinet_utils::MnemonicEncryptionStrength::Extreme,
-                            )
-                        } else if let Some(Value::String(cipher)) =
-                            account_settings.get("encrypted_mnemonic_high")
-                        {
-                            (
-                                cipher.clone(),
-                                clarinet_utils::MnemonicEncryptionStrength::High,
-                            )
-                        } else if let Some(Value::String(cipher)) =
-                            account_settings.get("encrypted_mnemonic_medium")
-                        {
-                            (
-                                cipher.clone(),
-                                clarinet_utils::MnemonicEncryptionStrength::Medium,
-                            )
-                        } else if let Some(Value::String(cipher)) =
-                            account_settings.get("encrypted_mnemonic")
-                        {
-                            (
-                                cipher.clone(),
-                                clarinet_utils::MnemonicEncryptionStrength::Basic,
-                            )
-                        } else {
-                            (
-                                String::new(),
-                                clarinet_utils::MnemonicEncryptionStrength::Basic,
-                            )
-                        };
+                    // The strongest key present wins
+                    let encrypted = MnemonicEncryptionStrength::strongest_first()
+                        .find_map(|strength| {
+                            let cipher = account_settings.get(strength.manifest_key())?.as_str()?;
+                            Some((cipher, strength))
+                        })
+                        .filter(|(cipher, _)| !cipher.is_empty());
 
-                    if !encrypted_mnemonic.is_empty() {
+                    if let Some((cipher, strength)) = encrypted {
                         let password = rpassword::prompt_password(format!(
                             "Enter password to decrypt mnemonic for account {account_name}: "
                         ))
                         .unwrap();
-                        mnemonic = clarinet_utils::decrypt_mnemonic_phrase(
-                            &encrypted_mnemonic,
-                            &password,
-                            encryption_strength,
-                        )
-                        .unwrap()
-                        .to_string();
+                        mnemonic = decrypt_mnemonic_phrase(cipher, &password, strength).unwrap();
                     }
 
                     let derivation = match account_settings.get("derivation") {
@@ -539,7 +506,6 @@ impl NetworkManifest {
                         AccountConfig {
                             label: account_name.to_string(),
                             mnemonic,
-                            encrypted_mnemonic,
                             derivation,
                             balance,
                             sbtc_balance,
@@ -644,7 +610,6 @@ impl NetworkManifest {
                 AccountConfig {
                     label: "stacker".to_string(),
                     mnemonic: stacker_mnemonic.clone(),
-                    encrypted_mnemonic: "".to_string(),
                     derivation: stacker_derivation_path.clone(),
                     balance: 100_000_000_000_000,
                     sbtc_balance: 1_000_000_000,
@@ -982,15 +947,15 @@ pub fn compute_addresses(
     derivation_path: &str,
     networks: &(BitcoinNetwork, StacksNetwork),
 ) -> (String, String, String) {
-    let (secret_bytes, public_key) =
-        get_bip32_keys_from_mnemonic(mnemonic, "", derivation_path).unwrap();
+    let DerivedKeys {
+        secret_key,
+        public_key,
+    } = get_bip32_keys_from_mnemonic(mnemonic, derivation_path).unwrap();
 
-    // Enforce a 33 bytes secret key format, expected by Stacks
-    let mut secret_key_bytes = secret_bytes;
-    secret_key_bytes.push(1);
-    let miner_secret_key_hex = bytes_to_hex(&secret_key_bytes);
+    // Stacks expects a 33-byte secret key: the 32 bytes and a compression flag
+    let miner_secret_key_hex = format!("{}01", bytes_to_hex(&secret_key));
 
-    let pub_key = Secp256k1PublicKey::from_slice(&public_key.serialize_compressed()).unwrap();
+    let pub_key = Secp256k1PublicKey::from_slice(&public_key).unwrap();
     let version = if matches!(networks.1, StacksNetwork::Mainnet) {
         stacks_common::address::C32_ADDRESS_VERSION_MAINNET_SINGLESIG
     } else {
@@ -1011,9 +976,9 @@ pub fn compute_addresses(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn compute_btc_address(public_key: &PublicKey, network: &BitcoinNetwork) -> String {
-    let public_key = bitcoin::PublicKey::from_slice(&public_key.serialize_compressed())
-        .expect("Unable to recreate public key");
+fn compute_btc_address(public_key: &[u8], network: &BitcoinNetwork) -> String {
+    let public_key =
+        bitcoin::PublicKey::from_slice(public_key).expect("Unable to recreate public key");
     let btc_address = bitcoin::Address::p2pkh(
         &public_key,
         match network {
@@ -1048,7 +1013,7 @@ pub fn is_in_reward_phase(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn compute_btc_address(_public_key: &PublicKey, _network: &BitcoinNetwork) -> String {
+fn compute_btc_address(_public_key: &[u8], _network: &BitcoinNetwork) -> String {
     "__not_implemented__".to_string()
 }
 
