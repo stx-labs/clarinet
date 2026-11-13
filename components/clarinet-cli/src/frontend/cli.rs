@@ -503,6 +503,11 @@ struct Console {
     /// Initial remote Stacks block height
     #[clap(long = "remote-data-initial-height", short = 'b')]
     pub remote_data_initial_height: Option<u32>,
+
+    /// Evaluate an expression or `::` command and exit instead of starting
+    /// the interactive console. Repeat to run several, in order, in one session
+    #[clap(long = "eval", short = 'e', value_name = "EXPR")]
+    pub eval: Vec<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1131,6 +1136,9 @@ pub fn main() {
             }
         },
         Command::Console(cmd) => {
+            // With -e, stdout holds only the results, so anything else goes
+            // to stderr and there is no banner, prompt or hint
+            let one_shot = !cmd.eval.is_empty();
             // Loop to handle `::reload` command
             loop {
                 let manifest = load_manifest_or_warn(cmd.manifest_path.clone());
@@ -1152,15 +1160,23 @@ pub fn main() {
                                 &artifacts.lint_diags,
                                 &deployment,
                             );
+                            let mut report = vec![];
                             if diags_digest.has_feedbacks() {
-                                println!("{}", diags_digest.message);
+                                report.push(diags_digest.message);
                             }
                             if diags_digest.errors > 0 {
-                                println!(
+                                report.push(format!(
                                     "{} {} detected",
                                     red!("x"),
                                     pluralize!(diags_digest.errors, "error")
-                                );
+                                ));
+                            }
+                            for line in report {
+                                if one_shot {
+                                    eprintln!("{line}");
+                                } else {
+                                    println!("{line}");
+                                }
                             }
                             std::process::exit(1);
                         }
@@ -1179,7 +1195,12 @@ pub fn main() {
                         Terminal::new(settings)
                     }
                 };
-                let reload = terminal.start();
+                let reload = if one_shot {
+                    eval_and_print(&mut terminal.session, &cmd.eval);
+                    false
+                } else {
+                    terminal.start()
+                };
 
                 // Report telemetry
                 if let Some(manifest) = manifest {
@@ -1216,7 +1237,7 @@ pub fn main() {
                 }
             }
 
-            if clarinetrc.enable_hints.unwrap_or(true) {
+            if !one_shot && clarinetrc.enable_hints.unwrap_or(true) {
                 display_contract_new_hint(None);
             }
         }
@@ -1570,6 +1591,20 @@ pub fn main() {
     };
 
     update_check::print_update_message(update_handle);
+}
+
+/// Runs `clarinet console -e` inputs in order, printing results to stdout and
+/// exiting with 1 at the first failure, after printing it to stderr.
+fn eval_and_print(session: &mut repl::Session, inputs: &[String]) {
+    for input in inputs {
+        match session.eval_console_input(input) {
+            Ok(output) => output.iter().for_each(|line| println!("{line}")),
+            Err(output) => {
+                output.iter().for_each(|line| eprintln!("{line}"));
+                std::process::exit(1);
+            }
+        }
+    }
 }
 
 fn print_available_lints(settings: &analysis::Settings) {

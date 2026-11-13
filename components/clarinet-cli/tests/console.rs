@@ -125,3 +125,35 @@ fn can_init_console_with_mxs() {
     assert_eq!(output[1], "false");
     assert_eq!(output[2], "true");
 }
+
+fn run_console_eval(inputs: &[&str]) -> std::process::Output {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut command = Command::new(env!("CARGO_BIN_EXE_clarinet"));
+    command.arg("console").current_dir(&temp_dir);
+    for input in inputs {
+        command.args(["-e", input]);
+    }
+    command.output().expect("Failed to run console")
+}
+
+#[test]
+fn eval_prints_only_results() {
+    let output = run_console_eval(&["::set_epoch 3.1", "(+ 1 2)", "::get_epoch"]);
+    assert!(output.status.success());
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "Epoch updated to: 3.1\n3\nCurrent epoch: 3.1\n"
+    );
+}
+
+#[test]
+fn eval_stops_at_first_error() {
+    let output = run_console_eval(&["(+ 1 2)", "(+ 1 u1)", "(+ 2 2)"]);
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(String::from_utf8_lossy(&output.stdout), "3\n");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("expecting expression of type 'int'"),
+        "{stderr}"
+    );
+}
