@@ -6,7 +6,7 @@
     "outDir": "dist/esm",
     "target": "esnext",
 
-    "lib": ["es2022", "dom"],
+    "lib": ["es2022", "esnext.disposable", "dom"],
     "types": []
   },
   "include": ["./src", "../common/src"]

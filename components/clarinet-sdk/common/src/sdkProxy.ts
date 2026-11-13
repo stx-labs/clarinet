@@ -26,6 +26,7 @@ type ProxySdk = {
   callPrivateFn(args: unknown): SerializedTransactionResult;
   deployContract(args: unknown): SerializedTransactionResult;
   execute(snippet: string): SerializedTransactionResult;
+  free(): void;
   getDataVar(contract: string, varName: string): string;
   getMapEntry(contract: string, mapName: string, mapKey: Uint8Array): string;
   mineBlock(txs: unknown[]): SerializedBlockTransactionResult[];
@@ -207,6 +208,13 @@ export function createSessionProxy<S extends ProxySdk, ContractOptions>(
         const getMapEntry: GetMapEntry = (contract, mapName, mapKey) =>
           Cl.deserialize(sdk.getMapEntry(contract, mapName, serializeCVBytes(mapKey)));
         return getMapEntry;
+      }
+
+      // wasm-bindgen unregisters `this` from its FinalizationRegistry, which
+      // only matches the SDK itself: freed through the Proxy, the finalizer
+      // would later free the same pointer again.
+      if (prop === "free" || prop === Symbol.dispose) {
+        return () => sdk.free();
       }
 
       return Reflect.get(session, prop, receiver);
