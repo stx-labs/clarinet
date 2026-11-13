@@ -740,7 +740,7 @@ fn execute_block_entry(
                         let hex = arg.as_str().ok_or_else(|| {
                             reject("Invalid argument: expected hex string".into())
                         })?;
-                        let bytes = hex_bytes(hex.strip_prefix("0x").unwrap_or(hex))
+                        let bytes = hex_bytes(hex.trim_prefix("0x"))
                             .map_err(|e| reject(format!("Invalid argument: {e}")))?;
                         value_from_bytes_exact(&bytes)
                             .map_err(|e| reject(format!("Invalid Clarity argument: {e}")))

@@ -107,7 +107,7 @@ fn fetch_latest_version() -> Option<(String, String)> {
     let published_at = json.get("published_at")?.as_str()?;
 
     // Strip leading 'v'
-    let version = tag.strip_prefix('v').unwrap_or(tag);
+    let version = tag.trim_prefix('v');
     Some((version.to_string(), published_at.to_string()))
 }
 
