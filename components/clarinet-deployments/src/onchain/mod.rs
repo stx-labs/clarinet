@@ -114,10 +114,6 @@ fn get_keypair(account: &AccountConfig) -> (Secp256k1PrivateKey, Secp256k1Public
     )
 }
 
-fn get_stacks_address(public_key: &Secp256k1PublicKey, network: &StacksNetwork) -> StacksAddress {
-    compute_stacks_address(public_key, matches!(network, StacksNetwork::Mainnet))
-}
-
 fn anchor_mode(anchor_block_only: bool) -> TransactionAnchorMode {
     if anchor_block_only {
         TransactionAnchorMode::OnChainOnly
@@ -135,7 +131,8 @@ fn sign_transaction_payload(
     network: &StacksNetwork,
 ) -> Result<StacksTransaction, String> {
     let (secret_key, public_key) = get_keypair(account);
-    let signer_addr = get_stacks_address(&public_key, network);
+    let signer_addr =
+        compute_stacks_address(&public_key, matches!(network, StacksNetwork::Mainnet));
 
     let spending_condition = TransactionSpendingCondition::Singlesig(SinglesigSpendingCondition {
         signer: signer_addr.bytes().clone(),

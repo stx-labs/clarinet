@@ -196,11 +196,8 @@ pub(crate) fn is_precomputed(phrase: &str, derivation: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tests::to_hex;
     use crate::{derive_bip32_keys, mnemonic_from_phrase};
-
-    fn to_hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
 
     /// The table is only as good as its agreement with the real derivation.
     #[test]
