@@ -8,7 +8,7 @@ use std::{env, process};
 use clap::{CommandFactory, Parser, Subcommand};
 use clap_complete::{Generator, Shell};
 use clarinet_defaults::DEFAULT_EPOCH;
-use clarinet_deployments::diagnostic_digest::DiagnosticsDigest;
+use clarinet_deployments::diagnostic_digest::{meets_min_level, DiagnosticsDigest};
 use clarinet_deployments::onchain::{
     apply_on_chain_deployment, get_initial_transactions_trackers, update_deployment_costs,
     DeploymentCommand, DeploymentEvent,
@@ -59,6 +59,24 @@ use crate::frontend::dap::{run_dap, run_dap_server};
 use crate::generate::changes::{Changes, TOMLEdition};
 use crate::generate::{self};
 use crate::lsp::run_lsp;
+
+/// The least severe diagnostics `check` shows.
+#[derive(Clone, Copy, PartialEq, Debug, clap::ValueEnum)]
+enum MinLevel {
+    Note,
+    Warning,
+    Error,
+}
+
+impl From<MinLevel> for Level {
+    fn from(min_level: MinLevel) -> Self {
+        match min_level {
+            MinLevel::Note => Level::Note,
+            MinLevel::Warning => Level::Warning,
+            MinLevel::Error => Level::Error,
+        }
+    }
+}
 
 #[derive(Clone, PartialEq, Debug, clap::ValueEnum)]
 enum OutputFormat {
@@ -571,6 +589,9 @@ struct Check {
     /// Set the output format
     #[clap(long = "output", default_value = "standard")]
     pub output_format: OutputFormat,
+    /// Only show diagnostics at this level or above
+    #[clap(long = "min-level", default_value = "note")]
+    pub min_level: MinLevel,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1151,6 +1172,7 @@ pub fn main() {
                                 &artifacts.diags,
                                 &artifacts.lint_diags,
                                 &deployment,
+                                &Level::Note,
                             );
                             if diags_digest.has_feedbacks() {
                                 println!("{}", diags_digest.message);
@@ -1302,9 +1324,13 @@ pub fn main() {
 
             match cmd.output_format {
                 OutputFormat::Json | OutputFormat::JsonPretty => {
-                    let mut all_diags: Vec<LintDiagnostic> =
-                        diagnostics.into_iter().map(LintDiagnostic::from).collect();
-                    all_diags.extend(lint_diagnostics);
+                    let min_level = Level::from(cmd.min_level);
+                    let all_diags: Vec<LintDiagnostic> = diagnostics
+                        .into_iter()
+                        .map(LintDiagnostic::from)
+                        .chain(lint_diagnostics)
+                        .filter(|ld| meets_min_level(&ld.diagnostic.level, &min_level))
+                        .collect();
                     let output = JsonCheckOutput {
                         success,
                         diagnostics: HashMap::from([(file, all_diags)]),
@@ -1326,10 +1352,12 @@ pub fn main() {
                     let mut warnings = 0usize;
                     let mut errors = 0usize;
 
+                    let min_level = Level::from(cmd.min_level);
                     for ld in diagnostics
                         .into_iter()
                         .map(LintDiagnostic::from)
                         .chain(lint_diagnostics)
+                        .filter(|ld| meets_min_level(&ld.diagnostic.level, &min_level))
                     {
                         match ld.diagnostic.level {
                             Level::Warning => warnings += 1,
@@ -1386,11 +1414,15 @@ pub fn main() {
                                 continue;
                             };
                             let key = path.to_string_lossy().into_owned();
-                            let entry = diagnostics.entry(key).or_default();
-                            entry.extend(diags.into_iter().map(LintDiagnostic::from));
-                            if let Some(lds) = artifacts.lint_diags.remove(&contract_id) {
-                                entry.extend(lds);
-                            }
+                            let lint_diags = artifacts.lint_diags.remove(&contract_id);
+                            let min_level = Level::from(cmd.min_level);
+                            diagnostics.entry(key).or_default().extend(
+                                diags
+                                    .into_iter()
+                                    .map(LintDiagnostic::from)
+                                    .chain(lint_diags.into_iter().flatten())
+                                    .filter(|ld| meets_min_level(&ld.diagnostic.level, &min_level)),
+                            );
                         }
                         let environment = environment.to_string();
                         let output = JsonCheckOutput {
@@ -1420,6 +1452,7 @@ pub fn main() {
                             &artifacts.diags,
                             &artifacts.lint_diags,
                             &deployment,
+                            &Level::from(cmd.min_level),
                         );
                         if diags_digest.has_feedbacks() {
                             println!("{}", diags_digest.message);

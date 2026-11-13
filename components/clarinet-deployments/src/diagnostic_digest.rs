@@ -7,6 +7,17 @@ use clarity_repl::repl::diagnostic::output_diagnostic;
 
 use crate::types::DeploymentSpecification;
 
+/// Whether a diagnostic at `level` is shown when only `min` and above are.
+/// `Level` has no ordering of its own.
+pub fn meets_min_level(level: &Level, min: &Level) -> bool {
+    let severity = |level: &Level| match level {
+        Level::Note => 0,
+        Level::Warning => 1,
+        Level::Error => 2,
+    };
+    severity(level) >= severity(min)
+}
+
 pub struct DiagnosticsDigest {
     pub message: String,
     pub errors: usize,
@@ -19,6 +30,7 @@ impl DiagnosticsDigest {
         contracts_diags: &HashMap<QualifiedContractIdentifier, Vec<Diagnostic>>,
         contracts_lint_diags: &HashMap<QualifiedContractIdentifier, Vec<LintDiagnostic>>,
         deployment: &DeploymentSpecification,
+        min_level: &Level,
     ) -> DiagnosticsDigest {
         let mut warnings = 0;
         let mut errors = 0;
@@ -52,6 +64,7 @@ impl DiagnosticsDigest {
                 .cloned()
                 .map(LintDiagnostic::from)
                 .chain(lint_diags.into_iter().flatten().cloned())
+                .filter(|ld| meets_min_level(&ld.diagnostic.level, min_level))
             {
                 match ld.diagnostic.level {
                     Level::Error => errors += 1,
