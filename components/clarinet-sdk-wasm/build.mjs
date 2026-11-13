@@ -13,6 +13,17 @@ const rootDir = new URL(".", import.meta.url).pathname;
 async function build_wasm_sdk() {
   const isDev = process.argv.includes("--dev");
   const profileFlag = isDev ? "--dev" : "--release";
+  // wasm-pack passes options it doesn't know (like `--features`) on to cargo.
+  // No `--` separator: after `--features`, wasm-pack would forward it literally.
+  const cargoArgs = isDev
+    ? []
+    : ["--config", path.join(rootDir, "release-profile.toml")];
+  if (!isDev) {
+    // Set SIMD through RUSTFLAGS because Cargo ignores config rustflags
+    // when RUSTFLAGS is set, as in CI.
+    const rustflags = process.env.RUSTFLAGS ?? "";
+    process.env.RUSTFLAGS = `${rustflags} -C target-feature=+simd128`.trim();
+  }
   console.log(`Building wasm SDK (${profileFlag})`);
 
   console.log("Deleting pkg-node");
@@ -30,6 +41,7 @@ async function build_wasm_sdk() {
       "pkg-node",
       "--target",
       "nodejs",
+      ...cargoArgs,
     ]),
     execCommand("wasm-pack", [
       "build",
@@ -42,6 +54,7 @@ async function build_wasm_sdk() {
       "web",
       "--features",
       "web",
+      ...cargoArgs,
     ]),
   ]);
 
