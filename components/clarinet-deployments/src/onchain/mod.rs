@@ -22,9 +22,7 @@ use stacks_codec::transaction::{
     TransactionPostConditionMode, TransactionPublicKeyEncoding, TransactionSmartContract,
     TransactionSpendingCondition, TransactionVersion,
 };
-use stacks_common::address::{
-    AddressHashMode, C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
-};
+use stacks_rpc_client::crypto::compute_stacks_address;
 use stacks_rpc_client::StacksRpc;
 
 mod bitcoin_deployment;
@@ -117,16 +115,7 @@ fn get_keypair(account: &AccountConfig) -> (Secp256k1PrivateKey, Secp256k1Public
 }
 
 fn get_stacks_address(public_key: &Secp256k1PublicKey, network: &StacksNetwork) -> StacksAddress {
-    StacksAddress::from_public_keys(
-        match network {
-            StacksNetwork::Mainnet => C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
-            _ => C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
-        },
-        &AddressHashMode::SerializeP2PKH,
-        1,
-        &vec![public_key.clone()],
-    )
-    .unwrap()
+    compute_stacks_address(public_key, matches!(network, StacksNetwork::Mainnet))
 }
 
 fn anchor_mode(anchor_block_only: bool) -> TransactionAnchorMode {

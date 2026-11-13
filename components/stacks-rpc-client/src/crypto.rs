@@ -35,6 +35,10 @@ pub struct Keypair {
 }
 
 pub fn compute_stacks_address(public_key: &Secp256k1PublicKey, mainnet: bool) -> StacksAddress {
+    // The address hashes the key as encoded, so the same point must always be compressed
+    let mut public_key = public_key.clone();
+    public_key.set_compressed(true);
+
     StacksAddress::from_public_keys(
         match mainnet {
             true => C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
@@ -42,7 +46,7 @@ pub fn compute_stacks_address(public_key: &Secp256k1PublicKey, mainnet: bool) ->
         },
         &AddressHashMode::SerializeP2PKH,
         1,
-        &vec![public_key.clone()],
+        &vec![public_key],
     )
     .unwrap()
 }
@@ -343,6 +347,16 @@ mod tests {
         assert_eq!(
             wallet_1().compute_stacks_address().to_string(),
             "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5"
+        );
+    }
+
+    #[test]
+    fn address_ignores_the_public_key_encoding_flag() {
+        let mut public_key = compute_keypair(&deployer_wallet()).public_key;
+        public_key.set_compressed(false);
+        assert_eq!(
+            compute_stacks_address(&public_key, false).to_string(),
+            "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM"
         );
     }
 
