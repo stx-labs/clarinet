@@ -1893,7 +1893,9 @@ fn load_deployment_if_exists(
                     .to_file_content(project_root)
                     .map_err(|err| format!("failed serializing deployment\n{err}"))?;
 
-                if updated_version == current_version {
+                if updated_version == current_version
+                    || deployment.matches_file_content(&current_version, project_root)
+                {
                     return load_deployment(project_root, &default_deployment_location).map(Some);
                 }
 

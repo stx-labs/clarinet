@@ -306,6 +306,14 @@ fn deserialize_variant<E: serde::de::Error>(
     .map_err(E::custom)
 }
 
+/// A hand-written `parameters:` key with no value is an empty list.
+fn null_as_empty<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::deserialize(deserializer).map(Option::unwrap_or_default)
+}
+
 // Accept current transaction-type mappings, legacy single-key mappings, and YAML !tags.
 impl<'de> Deserialize<'de> for TransactionSpecificationFile {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -369,6 +377,7 @@ pub struct ContractCallSpecificationFile {
     pub contract_id: String,
     pub expected_sender: String,
     pub method: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub parameters: Vec<String>,
     pub cost: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -406,6 +415,7 @@ pub struct EmulatedContractCallSpecificationFile {
     pub contract_id: String,
     pub emulated_sender: String,
     pub method: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub parameters: Vec<String>,
 }
 
@@ -1178,6 +1188,17 @@ impl DeploymentSpecification {
         to_yaml(&self.to_specification_file(project_root))
             .map(|s| s.into_bytes())
             .map_err(|err| format!("failed to serialize deployment\n{err}"))
+    }
+
+    /// Whether `file_content` already describes this deployment. Only the content
+    /// counts, so a plan written with another YAML style is not reported as changed.
+    pub fn matches_file_content(
+        &self,
+        file_content: impl AsRef<[u8]>,
+        project_root: &Path,
+    ) -> bool {
+        DeploymentSpecificationFile::from_file_content(file_content)
+            .is_ok_and(|on_disk| on_disk == self.to_specification_file(project_root))
     }
 
     pub fn sort_batches_by_epoch(&mut self) {

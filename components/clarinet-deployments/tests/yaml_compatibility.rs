@@ -204,6 +204,26 @@ fn generated_deployment_uses_yaml12_quoting_without_a_directive() {
     );
 }
 
+/// The example plan was written by yaml_serde: single quotes, no folded blocks.
+/// It describes the same deployment as today's output, so it is not reported as changed.
+#[test]
+fn plan_in_another_yaml_style_matches_the_deployment() {
+    let project_root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../clarinet-cli/examples/counter");
+    let plan_path = project_root.join("deployments/default.simnet-plan.yaml");
+    let on_disk = std::fs::read_to_string(&plan_path).unwrap();
+    let deployment = DeploymentSpecification::from_config_file(&plan_path, &project_root).unwrap();
+
+    let emitted = deployment.to_file_content(&project_root).unwrap();
+    assert_ne!(emitted, on_disk.as_bytes());
+    assert!(deployment.matches_file_content(&emitted, &project_root));
+    assert!(deployment.matches_file_content(&on_disk, &project_root));
+
+    let edited = on_disk.replace("wallet_1", "wallet_x");
+    assert!(!deployment.matches_file_content(edited, &project_root));
+    assert!(!deployment.matches_file_content("not: a plan", &project_root));
+}
+
 /// Unquoted legacy boolean words stay strings through the custom transaction deserializer.
 #[test]
 fn unquoted_call_strings_in_all_transaction_formats() {
@@ -225,24 +245,31 @@ fn unquoted_call_strings_in_all_transaction_formats() {
     }
 }
 
-/// Application policy: the transaction buffer rejects null for Vec<String>.
-/// Check empty/null spellings against the valid [] form emitted for an empty vector.
+/// A `parameters:` key with no value reads as the empty list, as it did with
+/// yaml_serde's value buffer. The key itself stays required.
 #[test_case(""; "empty_value")]
 #[test_case("~"; "tilde_null")]
 #[test_case("null"; "null_word")]
-fn null_is_not_a_call_parameter_sequence(parameters: &str) {
-    let call = |parameters: &str| {
-        formatdoc! {"
-            transaction-type: contract-call
+fn call_parameters_without_a_value_are_an_empty_list(parameters: &str) {
+    for (variant, sender) in [
+        ("contract-call", "expected-sender"),
+        ("emulated-contract-call", "emulated-sender"),
+    ] {
+        let required = formatdoc! {"
+            transaction-type: {variant}
             contract-id: ST000000000000000000002AMW42H.counter
-            expected-sender: ST000000000000000000002AMW42H
+            {sender}: ST000000000000000000002AMW42H
             method: initialize
             cost: 1
-            parameters: {parameters}
-        "}
-    };
-    assert!(from_yaml::<TransactionSpecificationFile>(call(parameters)).is_err());
-    assert!(from_yaml::<TransactionSpecificationFile>(call("[]")).is_ok());
+        "};
+        let call = |parameters: &str| {
+            from_yaml::<TransactionSpecificationFile>(format!(
+                "{required}parameters: {parameters}\n"
+            ))
+        };
+        assert_eq!(call(parameters).unwrap(), call("[]").unwrap());
+        assert!(from_yaml::<TransactionSpecificationFile>(&required).is_err());
+    }
 }
 
 /// Application policy: JSON buffering converts integer/boolean keys to strings,
