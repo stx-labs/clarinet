@@ -8,6 +8,7 @@ use clarinet_deployments::yaml::{from_yaml, to_yaml};
 use clarinet_files::StacksNetwork;
 use indoc::{formatdoc, indoc};
 use serde_json::{json, Value};
+use test_case::test_case;
 
 fn transactions() -> Vec<(&'static str, Value)> {
     vec![
@@ -42,7 +43,15 @@ fn transactions() -> Vec<(&'static str, Value)> {
     ]
 }
 
-/// All seven transaction variants accept current mappings, legacy mappings, and YAML tags.
+/// The legacy single-key mapping and the YAML-tagged spelling of one transaction body.
+fn legacy_and_tagged(variant: &str, body: &str) -> [String; 2] {
+    let indented: String = body.lines().map(|line| format!("  {line}\n")).collect();
+    [
+        format!("{variant}:\n{indented}"),
+        format!("!{variant}\n{body}\n"),
+    ]
+}
+
 #[test]
 fn all_transaction_variants_accept_all_three_formats() {
     for (variant, fields) in transactions() {
@@ -51,20 +60,12 @@ fn all_transaction_variants_accept_all_three_formats() {
         let expected: TransactionSpecificationFile =
             serde_json::from_value(current.clone()).unwrap();
         let body = serde_json::to_string_pretty(&fields).unwrap();
-        let indented: String = body.lines().map(|line| format!("  {line}\n")).collect();
-        let legacy = formatdoc! {"
-            {variant}:
-            {indented}
-        "};
-        let tagged = formatdoc! {"
-            !{variant}
-            {body}
-        "};
+        let [legacy, tagged] = legacy_and_tagged(variant, &body);
         let current = serde_json::to_string(&current).unwrap();
 
         for input in [current, legacy, tagged] {
             let actual: TransactionSpecificationFile =
-                from_yaml(input.as_bytes()).unwrap_or_else(|error| panic!("{input}\n{error}"));
+                from_yaml(&input).unwrap_or_else(|error| panic!("{input}\n{error}"));
             assert_eq!(actual, expected, "{input}");
             let emitted = to_yaml(&actual).unwrap();
             assert!(
@@ -72,14 +73,13 @@ fn all_transaction_variants_accept_all_three_formats() {
                 "{emitted}"
             );
             assert_eq!(
-                from_yaml::<TransactionSpecificationFile>(emitted.as_bytes()).unwrap(),
+                from_yaml::<TransactionSpecificationFile>(&emitted).unwrap(),
                 expected
             );
         }
     }
 }
 
-/// Invalid variants, missing fields, wrong shapes, and out-of-range amounts are rejected.
 #[test]
 fn malformed_transactions_are_rejected() {
     for input in [
@@ -107,20 +107,18 @@ fn malformed_transactions_are_rejected() {
         "},
     ] {
         assert!(
-            from_yaml::<TransactionSpecificationFile>(input.as_bytes()).is_err(),
+            from_yaml::<TransactionSpecificationFile>(input).is_err(),
             "{input}"
         );
     }
 }
 
-/// A standard mapping tag is not mistaken for a custom transaction-variant tag.
 #[test]
 fn standard_yaml_map_tag_is_not_a_transaction_variant() {
     let input = "!!map {transaction-type: btc-transfer, expected-sender: sender, recipient: recipient, sats-amount: 1, sats-per-byte: 1}";
-    assert!(from_yaml::<TransactionSpecificationFile>(input.as_bytes()).is_ok());
+    assert!(from_yaml::<TransactionSpecificationFile>(input).is_ok());
 }
 
-/// Parse the checked-in simnet plan, including genesis balances, epochs, and publish transactions.
 #[test]
 fn parse_counter_simnet_deployment_file() {
     let input =
@@ -151,7 +149,6 @@ fn parse_counter_simnet_deployment_file() {
     );
 }
 
-/// Parse the checked-in devnet plan, including node URLs, fees, and publish transactions.
 #[test]
 fn parse_counter_devnet_deployment_file() {
     let input =
@@ -178,8 +175,7 @@ fn parse_counter_devnet_deployment_file() {
     );
 }
 
-/// Production deployment output uses YAML 1.2 quoting without a version directive
-/// or document marker. The emitted legacy boolean word remains a string on re-reading.
+/// The emitted legacy boolean word remains a string on re-reading.
 #[test]
 fn generated_deployment_uses_yaml12_quoting_without_a_directive() {
     let deployment = DeploymentSpecification {
@@ -218,26 +214,95 @@ fn unquoted_call_strings_in_all_transaction_formats() {
         parameters: [yes, NO]
         cost: 1
     "};
-    let indented: String = fields.lines().map(|line| format!("  {line}\n")).collect();
-    for input in [
-        formatdoc! {"
-            transaction-type: contract-call
-            {fields}
-        "},
-        formatdoc! {"
-            contract-call:
-            {indented}
-        "},
-        formatdoc! {"
-            !contract-call
-            {fields}
-        "},
-    ] {
-        let TransactionSpecificationFile::ContractCall(call) = from_yaml(input.as_bytes()).unwrap()
-        else {
+    let current = format!("transaction-type: contract-call\n{fields}");
+    let [legacy, tagged] = legacy_and_tagged("contract-call", fields);
+    for input in [current, legacy, tagged] {
+        let TransactionSpecificationFile::ContractCall(call) = from_yaml(&input).unwrap() else {
             panic!("expected contract call");
         };
         assert_eq!(call.method, "on");
         assert_eq!(call.parameters, ["yes", "NO"]);
     }
+}
+
+/// Application policy: the transaction buffer rejects null for Vec<String>.
+/// Check empty/null spellings against the valid [] form emitted for an empty vector.
+#[test_case(""; "empty_value")]
+#[test_case("~"; "tilde_null")]
+#[test_case("null"; "null_word")]
+fn null_is_not_a_call_parameter_sequence(parameters: &str) {
+    let call = |parameters: &str| {
+        formatdoc! {"
+            transaction-type: contract-call
+            contract-id: ST000000000000000000002AMW42H.counter
+            expected-sender: ST000000000000000000002AMW42H
+            method: initialize
+            cost: 1
+            parameters: {parameters}
+        "}
+    };
+    assert!(from_yaml::<TransactionSpecificationFile>(call(parameters)).is_err());
+    assert!(from_yaml::<TransactionSpecificationFile>(call("[]")).is_ok());
+}
+
+/// Application policy: JSON buffering converts integer/boolean keys to strings,
+/// after which unknown fields are ignored. YAML 1.1 and 1.2 both allow scalar keys.
+#[test_case("1"; "integer_key")]
+#[test_case("true"; "boolean_key")]
+fn transaction_buffer_converts_scalar_keys_to_strings(key: &str) {
+    let input = formatdoc! {"
+        transaction-type: btc-transfer
+        expected-sender: sender
+        recipient: recipient
+        sats-amount: 1
+        sats-per-byte: 1
+        {key}: ignored
+    "};
+    assert!(from_yaml::<TransactionSpecificationFile>(input).is_ok());
+}
+
+/// Application policy: JSON buffering stringifies a numeric remap key before
+/// field deserialization. This tests loading, not later principal validation.
+#[test]
+fn transaction_buffer_converts_integer_remap_keys_to_strings() {
+    let input = indoc! {b"
+        transaction-type: requirement-publish
+        contract-id: id
+        remap-sender: sender
+        remap-principals: {1: recipient}
+        cost: 1
+        path: contracts/test.clar
+    "};
+    let TransactionSpecificationFile::RequirementPublish(spec) = from_yaml(input).unwrap() else {
+        panic!("expected requirement publish");
+    };
+    assert_eq!(
+        spec.remap_principals.unwrap().get("1").map(String::as_str),
+        Some("recipient")
+    );
+}
+
+/// Error-reporting policy: a buffered transaction error points at its mapping
+/// and omits the nested field path.
+#[test]
+fn deployment_diagnostics_point_to_the_transaction_mapping() {
+    let input = indoc! {"
+        name: test
+        network: devnet
+        plan:
+          batches:
+          - id: 0
+            transactions:
+            - transaction-type: btc-transfer
+              expected-sender: sender
+              recipient: recipient
+              sats-amount: wrong
+              sats-per-byte: 1
+    "};
+    let error = DeploymentSpecificationFile::from_file_content(input).unwrap_err();
+    assert!(
+        error.starts_with("unable to read file error: line"),
+        "{error}"
+    );
+    assert!(!error.contains("plan.batches[0].transactions"), "{error}");
 }

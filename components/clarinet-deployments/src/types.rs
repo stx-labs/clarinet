@@ -285,34 +285,25 @@ pub enum TransactionSpecificationFile {
     StxTransfer(StxTransferSpecificationFile),
 }
 
-fn deserialize_variant(
+fn deserialize_variant<E: serde::de::Error>(
     variant: &str,
     value: serde_json::Value,
-) -> Result<TransactionSpecificationFile, String> {
+) -> Result<TransactionSpecificationFile, E> {
+    use TransactionSpecificationFile as Tx;
+
     match variant {
-        "contract-call" => ContractCallSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::ContractCall)
-            .map_err(|e| e.to_string()),
-        "contract-publish" => ContractPublishSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::ContractPublish)
-            .map_err(|e| e.to_string()),
-        "emulated-contract-call" => EmulatedContractCallSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::EmulatedContractCall)
-            .map_err(|e| e.to_string()),
-        "emulated-contract-publish" => EmulatedContractPublishSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::EmulatedContractPublish)
-            .map_err(|e| e.to_string()),
-        "requirement-publish" => RequirementPublishSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::RequirementPublish)
-            .map_err(|e| e.to_string()),
-        "btc-transfer" => BtcTransferSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::BtcTransfer)
-            .map_err(|e| e.to_string()),
-        "stx-transfer" => StxTransferSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::StxTransfer)
-            .map_err(|e| e.to_string()),
-        other => Err(format!("unknown transaction type: {other}")),
+        "contract-call" => serde_json::from_value(value).map(Tx::ContractCall),
+        "contract-publish" => serde_json::from_value(value).map(Tx::ContractPublish),
+        "emulated-contract-call" => serde_json::from_value(value).map(Tx::EmulatedContractCall),
+        "emulated-contract-publish" => {
+            serde_json::from_value(value).map(Tx::EmulatedContractPublish)
+        }
+        "requirement-publish" => serde_json::from_value(value).map(Tx::RequirementPublish),
+        "btc-transfer" => serde_json::from_value(value).map(Tx::BtcTransfer),
+        "stx-transfer" => serde_json::from_value(value).map(Tx::StxTransfer),
+        other => return Err(E::custom(format!("unknown transaction type: {other}"))),
     }
+    .map_err(E::custom)
 }
 
 // Accept current transaction-type mappings, legacy single-key mappings, and YAML !tags.
@@ -326,8 +317,7 @@ impl<'de> Deserialize<'de> for TransactionSpecificationFile {
             serde_saphyr::Tagged::<serde_json::Value>::deserialize(deserializer)?;
 
         if let Some(tag) = tag.filter(|tag| tag != "tag:yaml.org,2002:map" && tag != "!") {
-            let variant = tag.trim_prefix('!');
-            return deserialize_variant(variant, value).map_err(serde::de::Error::custom);
+            return deserialize_variant(tag.trim_prefix('!'), value);
         }
 
         let serde_json::Value::Object(mut map) = value else {
@@ -340,10 +330,9 @@ impl<'de> Deserialize<'de> for TransactionSpecificationFile {
             let variant = variant.clone();
             map.remove("transaction-type");
             deserialize_variant(&variant, serde_json::Value::Object(map))
-                .map_err(serde::de::Error::custom)
         } else if map.len() == 1 {
             let (variant, fields) = map.into_iter().next().unwrap();
-            deserialize_variant(&variant, fields).map_err(serde::de::Error::custom)
+            deserialize_variant(&variant, fields)
         } else {
             Err(serde::de::Error::custom(
                 "expected mapping with 'transaction-type' key or single-key variant map",
@@ -984,8 +973,8 @@ impl DeploymentSpecification {
     ) -> Result<DeploymentSpecification, String> {
         let spec_file_content = paths::read_content(deployment_path)?;
 
-        let specification_file: DeploymentSpecificationFile =
-            from_yaml(&spec_file_content).map_err(|msg| format!("unable to read file {msg}"))?;
+        let specification_file =
+            DeploymentSpecificationFile::from_file_content(&spec_file_content)?;
 
         let network = match specification_file.network.to_lowercase().as_str() {
             "simnet" => StacksNetwork::Simnet,
@@ -1306,9 +1295,9 @@ impl DeploymentSpecificationFile {
         Self::from_file_content(&spec_file_content)
     }
     pub fn from_file_content(
-        spec_file_content: &str,
+        spec_file_content: impl AsRef<[u8]>,
     ) -> Result<DeploymentSpecificationFile, String> {
-        from_yaml(spec_file_content.as_bytes()).map_err(|msg| format!("unable to read file {msg}"))
+        from_yaml(spec_file_content).map_err(|msg| format!("unable to read file {msg}"))
     }
 }
 
