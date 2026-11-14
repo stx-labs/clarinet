@@ -342,6 +342,10 @@ mod tests {
     const ENCRYPTED_HIGH: &str = "sHvMdDwsEPBXoQKJc7GtfQvSiXL8Yfqrogwky43QzeQmaFXSw4TbKsjAQnuSEz8QfmA2wrq7sQGNViMH6Jqx9Jbew87PFDUipx6D9CZW23iJf5256co814JQowjsvXUpfP5rNZ38N5tMvLLWgzoJ4fmuSmfFVTQaNtqDFpUjdHGNQKq4qF2bR4k7eYpC2RDL5CpftYjuM8DDKbNubLjeAXFix1VXeVLQQ8hm8yCjxM9uLB4dth74Xzs7XoTdXDrsTVndeaj3kUHte23vPj3tjdu6A4gx";
     const ENCRYPTED_EXTREME: &str = "xyfrPwqmDJSSWfKEnTDt7CirmyKNjAGaqoFXZHGmjjoxagFN6giToMVTTYWGoctxhKx3apKm47V4C6vVhfupnaJaxpfiST378YxPoj2TQpJzaS1DZvLrxugYQGvcrY8wKvMBZymm56Da5wujeJ86sM6odeRe197vbr3Jp59gPA9LUdbj2VnGkqc8pxLkCxJqyfVdT5x8tXXW5QnQnRyZETDLisR31fAmYNKogZjmG3U9m2vpyEGoR5fwXDHiSEyWcvjUMhrG6EL9AnxTNcqWCVcvoPT9";
 
+    // Passwords are used byte for byte, without trimming or normalization.
+    const TEST_PASSWORD_NON_ASCII: &str = " p\u{e4}ssw\u{f6}rd \u{2713} ";
+    const ENCRYPTED_BASIC_NON_ASCII: &str = "39vSnA27wVs7RsTj7mc5TsPCvmhrXtAVBhsJxkswxekqjw3YnHaGaPTjbRthrUXyuxCcAupwrxMvmuQsk63nRMfxFRH5xEF4dTF3gLRtHDfMbTkW9fvALfnEJ25sY2tQBUvzHfr4aNU8B2XMoaGqrYFpe64EAuaMPoHZWnPAGUaJNK1kycAoVxeiiHY1GuDd9AJuWYMEoxhzFeEk8Q2KMW7EznbbYsTJzBpj2o9qiFmhK95p1";
+
     #[test]
     fn test_encryption_strength_parses_case_insensitively() {
         for &strength in MnemonicEncryptionStrength::VARIANTS {
@@ -548,34 +552,66 @@ mod tests {
     }
 
     #[track_caller]
-    fn assert_decrypts(strength: MnemonicEncryptionStrength, encrypted: &str) {
-        let decrypted = decrypt_mnemonic_phrase(encrypted, TEST_PASSWORD, strength)
-            .unwrap_or_else(|e| panic!("{strength} should decrypt: {e:?}"));
+    fn assert_decrypts(strength: MnemonicEncryptionStrength, password: &str, encrypted: &str) {
+        let decrypted = decrypt_mnemonic_phrase(encrypted, password, strength).unwrap();
         assert_eq!(TEST_PHRASE, decrypted);
     }
 
     #[test]
-    fn test_decrypts_existing_ciphertexts() {
-        assert_decrypts(MnemonicEncryptionStrength::Basic, ENCRYPTED_BASIC);
-        assert_decrypts(MnemonicEncryptionStrength::Medium, ENCRYPTED_MEDIUM);
+    fn test_decrypts_existing_basic_ciphertext() {
+        assert_decrypts(
+            MnemonicEncryptionStrength::Basic,
+            TEST_PASSWORD,
+            ENCRYPTED_BASIC,
+        );
+    }
+
+    #[test]
+    fn test_decrypts_existing_ciphertext_with_non_ascii_password() {
+        assert_decrypts(
+            MnemonicEncryptionStrength::Basic,
+            TEST_PASSWORD_NON_ASCII,
+            ENCRYPTED_BASIC_NON_ASCII,
+        );
+    }
+
+    #[test]
+    fn test_decrypts_existing_medium_ciphertext() {
+        assert_decrypts(
+            MnemonicEncryptionStrength::Medium,
+            TEST_PASSWORD,
+            ENCRYPTED_MEDIUM,
+        );
     }
 
     #[test]
     fn test_decrypts_existing_high_ciphertext() {
-        assert_decrypts(MnemonicEncryptionStrength::High, ENCRYPTED_HIGH);
+        assert_decrypts(
+            MnemonicEncryptionStrength::High,
+            TEST_PASSWORD,
+            ENCRYPTED_HIGH,
+        );
     }
 
     #[test]
     #[ignore = "needs 2 GiB of memory and over ten seconds"]
     fn test_decrypts_existing_extreme_ciphertext() {
-        assert_decrypts(MnemonicEncryptionStrength::Extreme, ENCRYPTED_EXTREME);
+        assert_decrypts(
+            MnemonicEncryptionStrength::Extreme,
+            TEST_PASSWORD,
+            ENCRYPTED_EXTREME,
+        );
     }
 
     #[test]
     fn test_encrypt_mnemonic_invalid_phrase() {
-        let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
+        let bad_phrase = format!("{TEST_PHRASE}z");
         assert!(matches!(
-            encrypt_mnemonic_phrase(bad_phrase, TEST_PASSWORD, MnemonicEncryptionStrength::Basic),
+            encrypt_mnemonic_phrase(
+                &bad_phrase,
+                TEST_PASSWORD,
+                MnemonicEncryptionStrength::Basic
+            ),
             Err(MnemonicEncryptionError::Mnemonic(_))
         ));
     }
