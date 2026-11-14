@@ -1,7 +1,6 @@
 mod precomputed;
 
 use std::collections::HashMap;
-use std::fmt;
 use std::str::FromStr;
 use std::sync::{LazyLock, Mutex, MutexGuard, PoisonError};
 
@@ -9,8 +8,7 @@ use aes_gcm::aead::Aead;
 use aes_gcm::{Aes256Gcm, Error as AesGcmError, KeyInit, Nonce};
 use argon2::{Argon2, Error as Argon2Error};
 use bip32::{DerivationPath, XPrv};
-use bip39::{Error as MnemonicError, Language, Mnemonic};
-use libsecp256k1::{PublicKey, SecretKey};
+use bip39::{Error as MnemonicError, Mnemonic};
 pub use precomputed::{
     DEFAULT_DEPLOYER_MNEMONIC, DEFAULT_DERIVATION_PATH, DEFAULT_DEVNET_ACCOUNTS,
     DEFAULT_FAUCET_MNEMONIC, DEFAULT_STACKER_MNEMONIC, DEFAULT_STACKS_MINER_MNEMONIC,
@@ -18,17 +16,24 @@ pub use precomputed::{
     DEFAULT_WALLET_4_MNEMONIC, DEFAULT_WALLET_5_MNEMONIC, DEFAULT_WALLET_6_MNEMONIC,
     DEFAULT_WALLET_7_MNEMONIC, DEFAULT_WALLET_8_MNEMONIC,
 };
-use rand::RngCore;
+use strum::{Display, EnumString, VariantArray};
 
-/// Size of the AES-GCM nonce
-pub const AES_GCM_NONCE_SIZE: usize = 12;
+const AES_GCM_NONCE_SIZE: usize = 12;
 
-/// Size of the random salt used for Strong encryption
-pub const SALT_SIZE: usize = 32;
+/// Size of the random salt stored ahead of the nonce, for every strength but
+/// `Basic`.
+const SALT_SIZE: usize = 32;
 
 const DEFAULT_SALT: &[u8] = b"clarinet_utils-derive_key_salt";
 
-#[derive(Debug, Clone, Copy, PartialEq, Default)]
+/// Declared weakest to strongest: [`Self::strongest_first`] relies on it.
+#[derive(Debug, Clone, Copy, PartialEq, Default, Display, EnumString, VariantArray)]
+#[strum(
+    serialize_all = "lowercase",
+    ascii_case_insensitive,
+    parse_err_ty = String,
+    parse_err_fn = unknown_strength
+)]
 pub enum MnemonicEncryptionStrength {
     Basic,
     #[default]
@@ -37,46 +42,51 @@ pub enum MnemonicEncryptionStrength {
     Extreme,
 }
 
-impl FromStr for MnemonicEncryptionStrength {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        match s.to_lowercase().as_str() {
-            "basic" => Ok(Self::Basic),
-            "medium" => Ok(Self::Medium),
-            "high" => Ok(Self::High),
-            "extreme" => Ok(Self::Extreme),
-            _ => Err(format!("unknown encryption strength: {s}")),
-        }
-    }
+fn unknown_strength(s: &str) -> String {
+    format!("unknown encryption strength: {s}")
 }
 
-impl fmt::Display for MnemonicEncryptionStrength {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+impl MnemonicEncryptionStrength {
+    pub fn strongest_first() -> impl Iterator<Item = Self> {
+        Self::VARIANTS.iter().rev().copied()
+    }
+
+    /// The account key in `settings/*.toml` that holds a mnemonic encrypted at
+    /// this strength.
+    pub const fn manifest_key(self) -> &'static str {
         match self {
-            Self::Basic => write!(f, "basic"),
-            Self::Medium => write!(f, "medium"),
-            Self::High => write!(f, "high"),
-            Self::Extreme => write!(f, "extreme"),
+            Self::Basic => "encrypted_mnemonic",
+            Self::Medium => "encrypted_mnemonic_medium",
+            Self::High => "encrypted_mnemonic_high",
+            Self::Extreme => "encrypted_mnemonic_extreme",
         }
     }
 }
 
-pub fn mnemonic_from_phrase(phrase: &str) -> Result<Mnemonic, String> {
-    Mnemonic::parse_in(Language::English, phrase).map_err(|e| e.to_string())
+fn parse_mnemonic(phrase: &str) -> Result<Mnemonic, String> {
+    Mnemonic::parse(phrase).map_err(|e| e.to_string())
 }
 
-pub fn random_mnemonic() -> Mnemonic {
-    let mut entropy = [0u8; 16]; // 16 bytes = 128 bits = 12 words
-    rand::rng().fill_bytes(&mut entropy);
-    Mnemonic::from_entropy_in(Language::English, &entropy).unwrap()
+/// Validates a phrase and returns it in BIP39's canonical spelling.
+pub fn mnemonic_from_phrase(phrase: &str) -> Result<String, String> {
+    parse_mnemonic(phrase).map(|mnemonic| mnemonic.to_string())
 }
 
-/// The 32-byte secret key and its secp256k1 public key.
-pub type DerivedKeys = (Vec<u8>, PublicKey);
+pub fn random_mnemonic() -> String {
+    // 16 bytes = 128 bits = 12 words
+    Mnemonic::from_entropy(&rand::random::<[u8; 16]>())
+        .unwrap()
+        .to_string()
+}
 
-/// `(phrase, derivation)`. Passphrase-bearing derivations are never memoized,
-/// so no passphrase is ever stored here — see [`get_bip32_keys_from_mnemonic`].
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DerivedKeys {
+    pub secret_key: [u8; 32],
+    /// Compressed SEC1
+    pub public_key: [u8; 33],
+}
+
+/// `(phrase, derivation)`
 type CacheKey = (String, String);
 
 /// Most callers derive the same handful of wallets over and over: the LSP
@@ -93,16 +103,15 @@ type CacheKey = (String, String);
 ///
 /// This does keep derived secrets alive for the lifetime of the process. That
 /// is already true of the plaintext mnemonics held in `NetworkManifest`, which
-/// outlive every caller here — but it is *not* true of a BIP39 passphrase,
-/// which is why those are excluded entirely rather than merely keyed on.
+/// outlive every caller here.
 static DERIVED_KEYS: LazyLock<Mutex<HashMap<CacheKey, DerivedKeys>>> =
     LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Bounds the map without being reachable by a real manifest. Sized well
 /// above any plausible account count on purpose: if the cap were close to it,
 /// a project declaring more wallets than the cap would evict and re-derive the
-/// overflow on *every* load, permanently — trading a bounded ~400 KB for
-/// hundreds of milliseconds. At this size an entry (~380 B) is only ever
+/// overflow on *every* load, permanently — trading a bounded ~300 KB for
+/// hundreds of milliseconds. At this size an entry (~300 B) is only ever
 /// evicted by the unrepeatable random phrases the cap exists for.
 const CACHE_LIMIT: usize = 1024;
 
@@ -117,14 +126,14 @@ const CACHE_LIMIT: usize = 1024;
 ///
 /// This is the sole insertion point and it evicts first, so the map is never
 /// above the cap on entry and at most one entry is ever removed.
-fn memoize(cache_key: CacheKey, keys: &DerivedKeys) {
+fn memoize(cache_key: CacheKey, keys: DerivedKeys) {
     let mut cache = derived_keys();
     if cache.len() >= CACHE_LIMIT {
         if let Some(evict) = cache.keys().next().cloned() {
             cache.remove(&evict);
         }
     }
-    cache.insert(cache_key, keys.clone());
+    cache.insert(cache_key, keys);
 }
 
 /// A poisoned lock only means another thread panicked mid-lookup. This is a
@@ -133,20 +142,7 @@ fn derived_keys() -> MutexGuard<'static, HashMap<CacheKey, DerivedKeys>> {
     DERIVED_KEYS.lock().unwrap_or_else(PoisonError::into_inner)
 }
 
-pub fn get_bip32_keys_from_mnemonic(
-    phrase: &str,
-    password: &str,
-    derivation: &str,
-) -> Result<DerivedKeys, String> {
-    // A BIP39 passphrase changes the seed, so neither cache can answer for one.
-    // Returning early rather than keying on the passphrase keeps it out of
-    // process memory: unlike the mnemonic, a passphrase is a user secret that
-    // `NetworkManifest` never holds, and nothing in the workspace passes one
-    // today, so there is nothing to trade away.
-    if !password.is_empty() {
-        return derive_bip32_keys(phrase, password, derivation);
-    }
-
+pub fn get_bip32_keys_from_mnemonic(phrase: &str, derivation: &str) -> Result<DerivedKeys, String> {
     // Checked first, so a table hit allocates nothing.
     if let Some(keys) = precomputed::lookup(phrase, derivation) {
         return Ok(keys);
@@ -154,7 +150,7 @@ pub fn get_bip32_keys_from_mnemonic(
 
     let cache_key = (phrase.to_string(), derivation.to_string());
     if let Some(keys) = derived_keys().get(&cache_key) {
-        return Ok(keys.clone());
+        return Ok(*keys);
     }
 
     // Deliberately not holding the guard across the derivation — it is ~0.8 ms,
@@ -162,76 +158,48 @@ pub fn get_bip32_keys_from_mnemonic(
     // other. Two threads racing on the same new wallet will therefore both
     // derive it and the second insert wins; that costs one extra derivation,
     // once, which is cheaper than the per-key coordination to avoid it.
-    let keys = derive_bip32_keys(phrase, password, derivation)?;
-    memoize(cache_key, &keys);
+    let keys = derive_bip32_keys(phrase, derivation)?;
+    memoize(cache_key, keys);
 
     Ok(keys)
 }
 
 /// The derivation itself, with no caching. ~0.8 ms native / ~1.4 ms in the
 /// wasm build, dominated by the 2048 PBKDF2-HMAC-SHA512 rounds of `to_seed`.
-fn derive_bip32_keys(
-    phrase: &str,
-    password: &str,
-    derivation: &str,
-) -> Result<DerivedKeys, String> {
-    let mnemonic = mnemonic_from_phrase(phrase)?;
-    let seed = mnemonic.to_seed(password);
+fn derive_bip32_keys(phrase: &str, derivation: &str) -> Result<DerivedKeys, String> {
+    let seed = parse_mnemonic(phrase)?.to_seed("");
     let derivation_path = DerivationPath::from_str(derivation).map_err(|e| e.to_string())?;
-    let xprv = XPrv::derive_from_path(seed, &derivation_path).map_err(|e| e.to_string())?;
-    let secret_bytes = xprv.private_key().to_bytes();
-    let secret_key = SecretKey::parse_slice(&secret_bytes).unwrap();
-    let public_key = PublicKey::from_secret_key(&secret_key);
-    Ok((secret_bytes.to_vec(), public_key))
+    let xprv = XPrv::derive_from_path(&seed, &derivation_path).map_err(|e| e.to_string())?;
+    Ok(DerivedKeys {
+        secret_key: xprv.to_bytes(),
+        public_key: xprv.public_key().to_bytes(),
+    })
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum EncryptionError {
-    /// Wrapped aes_gcm::Error
+#[derive(Debug)]
+pub enum MnemonicEncryptionError {
     AesGcm(AesGcmError),
-    /// Wrapped argon2::Error
     Argon2(Argon2Error),
-    /// AES data was missing from the buffer
+    Bs58Decode(bs58::decode::Error),
+    Mnemonic(MnemonicError),
+    Utf8(std::str::Utf8Error),
+    /// The ciphertext did not survive a base58 round trip
+    DecodingMismatch,
+    /// The buffer ends before the salt, or holds no ciphertext
     MissingData,
-    /// AES nonce was missing from the buffer
+    /// The buffer ends before the AES nonce
     MissingNonce,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub enum MnemonicEncryptionError {
-    /// Wrapped encryption error
-    Encryption(EncryptionError),
-    /// Wrapped bs58::decode::Error
-    Bs58Decode(bs58::decode::Error),
-    /// Decoding mismatch
-    DecodingMismatch,
-    /// Wrapped bip39::Error
-    Mnemonic(MnemonicError),
-    /// Wrapped std::str::Utf8Error
-    Utf8(std::str::Utf8Error),
-}
-
-impl From<Argon2Error> for EncryptionError {
-    fn from(e: Argon2Error) -> Self {
-        Self::Argon2(e)
-    }
-}
-
-impl From<AesGcmError> for EncryptionError {
+impl From<AesGcmError> for MnemonicEncryptionError {
     fn from(e: AesGcmError) -> Self {
         Self::AesGcm(e)
     }
 }
 
-impl From<EncryptionError> for MnemonicEncryptionError {
-    fn from(e: EncryptionError) -> Self {
-        Self::Encryption(e)
-    }
-}
-
-impl From<MnemonicError> for MnemonicEncryptionError {
-    fn from(e: MnemonicError) -> Self {
-        Self::Mnemonic(e)
+impl From<Argon2Error> for MnemonicEncryptionError {
+    fn from(e: Argon2Error) -> Self {
+        Self::Argon2(e)
     }
 }
 
@@ -241,118 +209,88 @@ impl From<bs58::decode::Error> for MnemonicEncryptionError {
     }
 }
 
+impl From<MnemonicError> for MnemonicEncryptionError {
+    fn from(e: MnemonicError) -> Self {
+        Self::Mnemonic(e)
+    }
+}
+
 impl From<std::str::Utf8Error> for MnemonicEncryptionError {
     fn from(e: std::str::Utf8Error) -> Self {
         Self::Utf8(e)
     }
 }
 
-pub fn derive_key(
+fn derive_key(
     password: &str,
-    buf: &mut [u8],
     strength: MnemonicEncryptionStrength,
     salt: &[u8],
-) -> Result<(), EncryptionError> {
-    let argon2 = match strength {
-        MnemonicEncryptionStrength::Basic => {
-            let params = argon2::Params::new(19456, 2, 1, Some(32))?;
-            Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
-        }
-        MnemonicEncryptionStrength::Medium => {
-            let params = argon2::Params::new(262144, 6, 2, Some(32))?;
-            Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
-        }
-        MnemonicEncryptionStrength::High => {
-            let params = argon2::Params::new(1048576, 10, 2, Some(32))?;
-            Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
-        }
-        MnemonicEncryptionStrength::Extreme => {
-            let params = argon2::Params::new(2097152, 14, 4, Some(32))?;
-            Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params)
-        }
+) -> Result<[u8; 32], MnemonicEncryptionError> {
+    let (m_cost, t_cost, p_cost) = match strength {
+        MnemonicEncryptionStrength::Basic => (19456, 2, 1),
+        MnemonicEncryptionStrength::Medium => (262144, 6, 2),
+        MnemonicEncryptionStrength::High => (1048576, 10, 2),
+        MnemonicEncryptionStrength::Extreme => (2097152, 14, 4),
     };
+    let params = argon2::Params::new(m_cost, t_cost, p_cost, Some(32))?;
 
-    argon2.hash_password_into(password.as_bytes(), salt, buf)?;
+    let mut key = [0u8; 32];
+    Argon2::new(argon2::Algorithm::Argon2id, argon2::Version::V0x13, params).hash_password_into(
+        password.as_bytes(),
+        salt,
+        &mut key,
+    )?;
 
-    Ok(())
+    Ok(key)
 }
 
-pub fn encrypt(
+/// Returns `salt || nonce || ciphertext`, without the salt for `Basic`.
+fn encrypt(
     data: &[u8],
     password: &str,
     strength: MnemonicEncryptionStrength,
-) -> Result<Vec<u8>, EncryptionError> {
-    let mut key = [0u8; 32];
-    let mut rng = rand::rng();
-    let mut nonce_bytes = [0u8; AES_GCM_NONCE_SIZE];
-
+) -> Result<Vec<u8>, MnemonicEncryptionError> {
     let mut bytes = Vec::new();
 
-    match strength {
-        MnemonicEncryptionStrength::Basic => {
-            derive_key(password, &mut key, strength, DEFAULT_SALT)?;
-        }
-        MnemonicEncryptionStrength::Medium
-        | MnemonicEncryptionStrength::High
-        | MnemonicEncryptionStrength::Extreme => {
-            let mut salt = [0u8; SALT_SIZE];
-            rng.fill_bytes(&mut salt);
-            derive_key(password, &mut key, strength, &salt)?;
-            bytes.extend_from_slice(&salt);
-        }
-    }
+    let key = if strength == MnemonicEncryptionStrength::Basic {
+        derive_key(password, strength, DEFAULT_SALT)?
+    } else {
+        let salt: [u8; SALT_SIZE] = rand::random();
+        bytes.extend_from_slice(&salt);
+        derive_key(password, strength, &salt)?
+    };
 
-    rng.fill_bytes(&mut nonce_bytes);
+    let nonce: [u8; AES_GCM_NONCE_SIZE] = rand::random();
+    let ciphertext = Aes256Gcm::new((&key).into()).encrypt(&Nonce::from(nonce), data)?;
 
-    let nonce = Nonce::from(nonce_bytes);
-    let cipher = Aes256Gcm::new((&key).into());
-    let cipher_vec = cipher.encrypt(&nonce, data.to_vec().as_ref())?;
-
-    bytes.extend_from_slice(&nonce_bytes);
-    bytes.extend_from_slice(&cipher_vec);
+    bytes.extend_from_slice(&nonce);
+    bytes.extend_from_slice(&ciphertext);
 
     Ok(bytes)
 }
 
-pub fn decrypt(
+fn decrypt(
     data: &[u8],
     password: &str,
     strength: MnemonicEncryptionStrength,
-) -> Result<Vec<u8>, EncryptionError> {
-    let mut key = [0u8; 32];
-
-    let rest = match strength {
-        MnemonicEncryptionStrength::Basic => {
-            derive_key(password, &mut key, strength, DEFAULT_SALT)?;
-            data
-        }
-        MnemonicEncryptionStrength::Medium
-        | MnemonicEncryptionStrength::High
-        | MnemonicEncryptionStrength::Extreme => {
-            let Some(salt) = data.get(..SALT_SIZE) else {
-                return Err(EncryptionError::MissingData);
-            };
-            derive_key(password, &mut key, strength, salt)?;
-            &data[SALT_SIZE..]
-        }
+) -> Result<Vec<u8>, MnemonicEncryptionError> {
+    let (key, rest) = if strength == MnemonicEncryptionStrength::Basic {
+        (derive_key(password, strength, DEFAULT_SALT)?, data)
+    } else {
+        let (salt, rest) = data
+            .split_first_chunk::<SALT_SIZE>()
+            .ok_or(MnemonicEncryptionError::MissingData)?;
+        (derive_key(password, strength, salt)?, rest)
     };
 
-    let Some(nonce_data) = rest.get(..AES_GCM_NONCE_SIZE) else {
-        return Err(EncryptionError::MissingNonce);
-    };
-    let Some(cipher_data) = rest.get(AES_GCM_NONCE_SIZE..) else {
-        return Err(EncryptionError::MissingData);
-    };
-    if cipher_data.is_empty() {
-        return Err(EncryptionError::MissingData);
+    let (nonce, ciphertext) = rest
+        .split_first_chunk::<AES_GCM_NONCE_SIZE>()
+        .ok_or(MnemonicEncryptionError::MissingNonce)?;
+    if ciphertext.is_empty() {
+        return Err(MnemonicEncryptionError::MissingData);
     }
-    let nonce_array: [u8; AES_GCM_NONCE_SIZE] = nonce_data
-        .try_into()
-        .map_err(|_| EncryptionError::MissingNonce)?;
-    let nonce = Nonce::from(nonce_array);
-    let cipher = Aes256Gcm::new((&key).into());
 
-    Ok(cipher.decrypt(&nonce, cipher_data)?)
+    Ok(Aes256Gcm::new((&key).into()).decrypt(&Nonce::from(*nonce), ciphertext)?)
 }
 
 pub fn encrypt_mnemonic_phrase(
@@ -360,7 +298,7 @@ pub fn encrypt_mnemonic_phrase(
     password: &str,
     strength: MnemonicEncryptionStrength,
 ) -> Result<String, MnemonicEncryptionError> {
-    let _ = Mnemonic::parse_in(Language::English, phrase)?;
+    Mnemonic::parse(phrase)?;
     let ciphertext = encrypt(phrase.as_bytes(), password, strength)?;
     let encrypted_mnemonic = bs58::encode(&ciphertext).into_string();
     let decoded_ciphertext = bs58::decode(&encrypted_mnemonic).into_vec()?;
@@ -376,13 +314,12 @@ pub fn decrypt_mnemonic_phrase(
     encrypted_mnemonic: &str,
     password: &str,
     strength: MnemonicEncryptionStrength,
-) -> Result<Mnemonic, MnemonicEncryptionError> {
+) -> Result<String, MnemonicEncryptionError> {
     let cipher = bs58::decode(encrypted_mnemonic).into_vec()?;
     let plain = decrypt(&cipher, password, strength)?;
     let phrase = str::from_utf8(&plain)?;
-    let mnemonic = Mnemonic::parse_in(Language::English, phrase)?;
 
-    Ok(mnemonic)
+    Ok(Mnemonic::parse(phrase)?.to_string())
 }
 
 #[cfg(test)]
@@ -390,49 +327,93 @@ mod tests {
     use super::*;
     use crate::precomputed::is_precomputed;
 
+    pub(crate) fn to_hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    const TEST_PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
+    const TEST_PASSWORD: &str = "foo";
+
+    // `TEST_PHRASE` encrypted with `TEST_PASSWORD`, generated with argon2 0.5 and
+    // aes-gcm 0.10. Do not regenerate: values like these sit in users' settings
+    // and must keep decrypting.
+    const ENCRYPTED_BASIC: &str = "3F94JMNFn3dNyBonXFFJS8AgfeNHUrc7eLWVjV2nAcMvPGniWVEaCZFwzWEw1S4ADgMNxwhJtsL65WSihP1KNyPd85SEAHZ1LV8pRUjP6YVBoBkK1JSZn23j2xMJYvCWJa5Chp6cn9gV9chzXjxtHgBxffkete83xJgkPy9t98fybsw3ovcKGJdXY4EHZvQLCryMNHJvhaoQJB1i7qF1f3pAotJQ5drjSsd4p8rtsd63ZH4sg";
+    const ENCRYPTED_MEDIUM: &str = "asRVpd5MFXwJY7CbBsZjRAmb4vGeidfh12pfNzGzcJiazb5bWPoC3EvERfoxmE7JGTemsYxJWmDMUfdtr9FsbUDfBREiFANxe37Ep9TR9FEBhWnHGoeHF4jCUthBwVBLPcZeYCeSj6GBMnVnk9RzCe1b7Ry65wcz6YiPhhm9KmFVcAc8T7fDXuPe47kxJLgZ3oXazvnk41gTsSgv6GT2kChGHCkE1ShQbLQrEkYfyxRBNnQBXb8TLZiK7VQr1pc42t57CbrPm4xjc2db1PiLjszVWr3m";
+    const ENCRYPTED_HIGH: &str = "sHvMdDwsEPBXoQKJc7GtfQvSiXL8Yfqrogwky43QzeQmaFXSw4TbKsjAQnuSEz8QfmA2wrq7sQGNViMH6Jqx9Jbew87PFDUipx6D9CZW23iJf5256co814JQowjsvXUpfP5rNZ38N5tMvLLWgzoJ4fmuSmfFVTQaNtqDFpUjdHGNQKq4qF2bR4k7eYpC2RDL5CpftYjuM8DDKbNubLjeAXFix1VXeVLQQ8hm8yCjxM9uLB4dth74Xzs7XoTdXDrsTVndeaj3kUHte23vPj3tjdu6A4gx";
+    const ENCRYPTED_EXTREME: &str = "xyfrPwqmDJSSWfKEnTDt7CirmyKNjAGaqoFXZHGmjjoxagFN6giToMVTTYWGoctxhKx3apKm47V4C6vVhfupnaJaxpfiST378YxPoj2TQpJzaS1DZvLrxugYQGvcrY8wKvMBZymm56Da5wujeJ86sM6odeRe197vbr3Jp59gPA9LUdbj2VnGkqc8pxLkCxJqyfVdT5x8tXXW5QnQnRyZETDLisR31fAmYNKogZjmG3U9m2vpyEGoR5fwXDHiSEyWcvjUMhrG6EL9AnxTNcqWCVcvoPT9";
+
+    // Passwords are used byte for byte, without trimming or normalization.
+    const TEST_PASSWORD_NON_ASCII: &str = " p\u{e4}ssw\u{f6}rd \u{2713} ";
+    const ENCRYPTED_BASIC_NON_ASCII: &str = "39vSnA27wVs7RsTj7mc5TsPCvmhrXtAVBhsJxkswxekqjw3YnHaGaPTjbRthrUXyuxCcAupwrxMvmuQsk63nRMfxFRH5xEF4dTF3gLRtHDfMbTkW9fvALfnEJ25sY2tQBUvzHfr4aNU8B2XMoaGqrYFpe64EAuaMPoHZWnPAGUaJNK1kycAoVxeiiHY1GuDd9AJuWYMEoxhzFeEk8Q2KMW7EznbbYsTJzBpj2o9qiFmhK95p1";
+
+    #[test]
+    fn test_encryption_strength_parses_case_insensitively() {
+        for &strength in MnemonicEncryptionStrength::VARIANTS {
+            let name = strength.to_string();
+            assert_eq!(name, name.to_lowercase());
+            assert_eq!(name.parse(), Ok(strength));
+            assert_eq!(name.to_uppercase().parse(), Ok(strength));
+        }
+        assert_eq!(
+            "strongest".parse::<MnemonicEncryptionStrength>(),
+            Err("unknown encryption strength: strongest".to_string())
+        );
+    }
+
+    #[test]
+    fn test_strongest_first_order() {
+        use MnemonicEncryptionStrength::{Basic, Extreme, High, Medium};
+        assert_eq!(
+            MnemonicEncryptionStrength::strongest_first().collect::<Vec<_>>(),
+            [Extreme, High, Medium, Basic]
+        );
+    }
+
     #[test]
     fn test_mnemonic_from_phrase_12() {
         let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        let mnemonic = mnemonic_from_phrase(phrase);
-        assert!(mnemonic.is_ok());
-        assert_eq!(mnemonic.unwrap().to_string(), phrase);
+        assert_eq!(mnemonic_from_phrase(phrase).as_deref(), Ok(phrase));
     }
 
     #[test]
     fn test_mnemonic_from_phrase_24() {
         let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
-        let mnemonic = mnemonic_from_phrase(phrase);
-        assert!(mnemonic.is_ok());
-        assert_eq!(mnemonic.unwrap().to_string(), phrase);
+        assert_eq!(mnemonic_from_phrase(phrase).as_deref(), Ok(phrase));
     }
 
     #[test]
     fn test_random_mnemonic_12() {
-        let mnemonic = random_mnemonic();
-        let phrase = mnemonic.to_string();
-        assert_eq!(phrase.split_whitespace().count(), 12);
+        assert_eq!(random_mnemonic().split_whitespace().count(), 12);
     }
 
     #[test]
     fn test_get_bip32_keys_from_mnemonic_12() {
         let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
         let derivation = "m/44'/0'/0'/0/0";
-        let result = get_bip32_keys_from_mnemonic(phrase, "", derivation);
-        assert!(result.is_ok());
-        let (secret, pubkey) = result.unwrap();
-        assert_eq!(secret.len(), 32);
-        assert_eq!(pubkey.serialize_compressed().len(), 33);
+        let keys = get_bip32_keys_from_mnemonic(phrase, derivation).unwrap();
+        assert_eq!(
+            to_hex(&keys.secret_key),
+            "e284129cc0922579a535bbf4d1a3b25773090d28c909bc0fed73b5e0222cc372"
+        );
+        assert_eq!(
+            to_hex(&keys.public_key),
+            "03aaeb52dd7494c361049de67cc680e83ebcbbbdbeb13637d92cd845f70308af5e"
+        );
     }
 
     #[test]
     fn test_get_bip32_keys_from_mnemonic_24() {
         let phrase = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon art";
         let derivation = "m/44'/0'/0'/0/0";
-        let result = get_bip32_keys_from_mnemonic(phrase, "", derivation);
-        assert!(result.is_ok());
-        let (secret, pubkey) = result.unwrap();
-        assert_eq!(secret.len(), 32);
-        assert_eq!(pubkey.serialize_compressed().len(), 33);
+        let keys = get_bip32_keys_from_mnemonic(phrase, derivation).unwrap();
+        assert_eq!(
+            to_hex(&keys.secret_key),
+            "cb4793fa23e98437e2d37655eaaa59cf03a0637ea890f85a85d91946e9214c64"
+        );
+        assert_eq!(
+            to_hex(&keys.public_key),
+            "0342d943b8dba93a4ce29b858479c67f1e4f1110eecbe1f83dc01b455eb8b123b3"
+        );
     }
 
     /// A precomputed phrase must come back byte-identical to a live derivation.
@@ -442,46 +423,9 @@ mod tests {
         const DERIVATION: &str = DEFAULT_DERIVATION_PATH;
         assert!(is_precomputed(PHRASE, DERIVATION));
 
-        let (cached_secret, cached_public) =
-            get_bip32_keys_from_mnemonic(PHRASE, "", DERIVATION).unwrap();
-        let (derived_secret, derived_public) = derive_bip32_keys(PHRASE, "", DERIVATION).unwrap();
-
-        assert_eq!(cached_secret, derived_secret);
-        assert_eq!(cached_public, derived_public);
-    }
-
-    /// A passphrase is a user secret that `NetworkManifest` never holds, so it
-    /// must not end up in the process-wide memo.
-    #[test]
-    fn test_passphrase_bearing_derivations_are_not_memoized() {
-        // Asserting on the map's *length* would race with any other test that
-        // inserts; this phrase is freshly random, so only this test could put
-        // it there.
-        let phrase = random_mnemonic().to_string();
-
-        get_bip32_keys_from_mnemonic(&phrase, "hunter2", DEFAULT_DERIVATION_PATH).unwrap();
-
-        assert!(
-            !derived_keys().keys().any(|(cached, _)| cached == &phrase),
-            "a passphrase-bearing derivation was memoized"
-        );
-    }
-
-    /// A BIP39 passphrase produces a different seed, so the table must not
-    /// answer for it.
-    #[test]
-    fn test_get_bip32_keys_bypasses_table_when_password_is_set() {
-        const PHRASE: &str = DEFAULT_DEPLOYER_MNEMONIC;
-        const DERIVATION: &str = DEFAULT_DERIVATION_PATH;
-
-        let (no_password, _) = get_bip32_keys_from_mnemonic(PHRASE, "", DERIVATION).unwrap();
-        let (with_password, _) =
-            get_bip32_keys_from_mnemonic(PHRASE, "hunter2", DERIVATION).unwrap();
-
-        assert_ne!(no_password, with_password);
         assert_eq!(
-            with_password,
-            derive_bip32_keys(PHRASE, "hunter2", DERIVATION).unwrap().0
+            get_bip32_keys_from_mnemonic(PHRASE, DERIVATION).unwrap(),
+            derive_bip32_keys(PHRASE, DERIVATION).unwrap()
         );
     }
 
@@ -493,9 +437,9 @@ mod tests {
         const DERIVATION: &str = "m/44'/5757'/0'/0/3";
         assert!(!is_precomputed(PHRASE, DERIVATION));
 
-        let first = get_bip32_keys_from_mnemonic(PHRASE, "", DERIVATION).unwrap();
-        let second = get_bip32_keys_from_mnemonic(PHRASE, "", DERIVATION).unwrap();
-        let fresh = derive_bip32_keys(PHRASE, "", DERIVATION).unwrap();
+        let first = get_bip32_keys_from_mnemonic(PHRASE, DERIVATION).unwrap();
+        let second = get_bip32_keys_from_mnemonic(PHRASE, DERIVATION).unwrap();
+        let fresh = derive_bip32_keys(PHRASE, DERIVATION).unwrap();
 
         assert_eq!(first, second);
         assert_eq!(first, fresh);
@@ -511,13 +455,10 @@ mod tests {
     #[test]
     fn test_memo_still_caches_once_full() {
         const DERIVATION: &str = "m/44'/5757'/0'/0/7";
-        let keys = derive_bip32_keys(DEFAULT_DEPLOYER_MNEMONIC, "", DERIVATION).unwrap();
+        let keys = derive_bip32_keys(DEFAULT_DEPLOYER_MNEMONIC, DERIVATION).unwrap();
 
         for i in 0..CACHE_LIMIT + 4 {
-            memoize(
-                (format!("filler phrase {i}"), DERIVATION.to_string()),
-                &keys,
-            );
+            memoize((format!("filler phrase {i}"), DERIVATION.to_string()), keys);
         }
         assert!(
             derived_keys().len() <= CACHE_LIMIT,
@@ -529,7 +470,7 @@ mod tests {
             "a phrase seen after the cap".to_string(),
             DERIVATION.to_string(),
         );
-        memoize(key.clone(), &keys);
+        memoize(key.clone(), keys);
         assert_eq!(
             derived_keys().get(&key),
             Some(&keys),
@@ -541,33 +482,8 @@ mod tests {
     #[test]
     fn test_get_bip32_keys_still_rejects_invalid_input() {
         const PHRASE: &str = "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about";
-        assert!(
-            get_bip32_keys_from_mnemonic("not a mnemonic", "", DEFAULT_DERIVATION_PATH).is_err()
-        );
-        assert!(get_bip32_keys_from_mnemonic(PHRASE, "", "not a path").is_err());
-    }
-
-    #[test]
-    fn test_derive_key() {
-        let mut short = [0u8; 1];
-        let mut right = [0u8; 32];
-        let password = "foo";
-
-        let _ = derive_key(
-            password,
-            &mut short,
-            MnemonicEncryptionStrength::Basic,
-            DEFAULT_SALT,
-        )
-        .expect_err("Should have failed with 1-byte output buffer");
-
-        derive_key(
-            password,
-            &mut right,
-            MnemonicEncryptionStrength::Basic,
-            DEFAULT_SALT,
-        )
-        .expect("Should have succeeded with 32-byte output buffer");
+        assert!(get_bip32_keys_from_mnemonic("not a mnemonic", DEFAULT_DERIVATION_PATH).is_err());
+        assert!(get_bip32_keys_from_mnemonic(PHRASE, "not a path").is_err());
     }
 
     #[test]
@@ -586,28 +502,26 @@ mod tests {
         buf.truncate(AES_GCM_NONCE_SIZE - 1);
         assert!(matches!(
             decrypt(&buf, password, strength),
-            Err(EncryptionError::MissingNonce)
+            Err(MnemonicEncryptionError::MissingNonce)
         ));
 
         let mut buf = encrypted.clone();
         buf.truncate(AES_GCM_NONCE_SIZE);
         assert!(matches!(
             decrypt(&buf, password, strength),
-            Err(EncryptionError::MissingData)
+            Err(MnemonicEncryptionError::MissingData)
         ));
 
         let mut buf = encrypted;
         buf.truncate(AES_GCM_NONCE_SIZE + 1);
         assert!(matches!(
             decrypt(&buf, password, strength),
-            Err(EncryptionError::AesGcm(_))
+            Err(MnemonicEncryptionError::AesGcm(_))
         ));
     }
 
     #[test]
     fn test_encrypt_mnemonic() {
-        const TEST_PHRASE: &str = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout claw";
-        const TEST_PASSWORD: &str = "foo";
         for strength in [
             MnemonicEncryptionStrength::Basic,
             MnemonicEncryptionStrength::Medium,
@@ -617,7 +531,7 @@ mod tests {
             let decrypted = decrypt_mnemonic_phrase(&encrypted, TEST_PASSWORD, strength)
                 .expect("decrypt_mnemonic_phrase should succeed");
 
-            assert_eq!(TEST_PHRASE, decrypted.to_string());
+            assert_eq!(TEST_PHRASE, decrypted);
 
             for other in [
                 MnemonicEncryptionStrength::Basic,
@@ -637,12 +551,67 @@ mod tests {
         }
     }
 
+    #[track_caller]
+    fn assert_decrypts(strength: MnemonicEncryptionStrength, password: &str, encrypted: &str) {
+        let decrypted = decrypt_mnemonic_phrase(encrypted, password, strength).unwrap();
+        assert_eq!(TEST_PHRASE, decrypted);
+    }
+
+    #[test]
+    fn test_decrypts_existing_basic_ciphertext() {
+        assert_decrypts(
+            MnemonicEncryptionStrength::Basic,
+            TEST_PASSWORD,
+            ENCRYPTED_BASIC,
+        );
+    }
+
+    #[test]
+    fn test_decrypts_existing_ciphertext_with_non_ascii_password() {
+        assert_decrypts(
+            MnemonicEncryptionStrength::Basic,
+            TEST_PASSWORD_NON_ASCII,
+            ENCRYPTED_BASIC_NON_ASCII,
+        );
+    }
+
+    #[test]
+    fn test_decrypts_existing_medium_ciphertext() {
+        assert_decrypts(
+            MnemonicEncryptionStrength::Medium,
+            TEST_PASSWORD,
+            ENCRYPTED_MEDIUM,
+        );
+    }
+
+    #[test]
+    fn test_decrypts_existing_high_ciphertext() {
+        assert_decrypts(
+            MnemonicEncryptionStrength::High,
+            TEST_PASSWORD,
+            ENCRYPTED_HIGH,
+        );
+    }
+
+    #[test]
+    #[ignore = "needs 2 GiB of memory and over ten seconds"]
+    fn test_decrypts_existing_extreme_ciphertext() {
+        assert_decrypts(
+            MnemonicEncryptionStrength::Extreme,
+            TEST_PASSWORD,
+            ENCRYPTED_EXTREME,
+        );
+    }
+
     #[test]
     fn test_encrypt_mnemonic_invalid_phrase() {
-        let bad_phrase = "twice kind fence tip hidden tilt action fragile skin nothing glory cousin green tomorrow spring wrist shed math olympic multiply hip blue scout clawz";
-        const TEST_PASSWORD: &str = "foo";
+        let bad_phrase = format!("{TEST_PHRASE}z");
         assert!(matches!(
-            encrypt_mnemonic_phrase(bad_phrase, TEST_PASSWORD, MnemonicEncryptionStrength::Basic),
+            encrypt_mnemonic_phrase(
+                &bad_phrase,
+                TEST_PASSWORD,
+                MnemonicEncryptionStrength::Basic
+            ),
             Err(MnemonicEncryptionError::Mnemonic(_))
         ));
     }
