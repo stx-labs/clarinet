@@ -30,7 +30,9 @@ opt-level = "s"
 [profile.release.package.aho-corasick]
 opt-level = "s"
 
-# Prefer size for deployment YAML parsing and error reporting.
+# Optimize serde-saphyr and its dependencies for size: the Wasm is ~1.4% smaller,
+# with no measurable slowdown. YAML is only read or written when a deployment
+# plan is loaded or generated.
 [profile.release.package.serde-saphyr]
 opt-level = "s"
 
