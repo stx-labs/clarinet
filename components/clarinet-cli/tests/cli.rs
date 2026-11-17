@@ -323,6 +323,80 @@ fn test_formatter_check() {
     );
 }
 
+#[test]
+fn test_formatter_continues_after_failed_files() {
+    let project_name = "test_formatter_continues";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+    let contracts = project_path.join("contracts");
+
+    // Contracts are formatted in name order, so both failures come first
+    for name in ["broken", "deleted", "unformatted"] {
+        let status = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+            .args(["contract", "new", name])
+            .current_dir(&project_path)
+            .status()
+            .unwrap();
+        assert!(status.success(), "clarinet contract new {name} failed");
+    }
+    let broken_code = indoc! {"
+        (define-public (f)
+          (ok u1)
+    "};
+    fs::write(contracts.join("broken.clar"), broken_code).unwrap();
+    fs::remove_file(contracts.join("deleted.clar")).unwrap();
+    let unformatted_code = indoc! {"
+        (define-public (g)
+        (ok   u2))
+    "};
+    fs::write(contracts.join("unformatted.clar"), unformatted_code).unwrap();
+
+    let run_format = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_clarinet"))
+            .arg("format")
+            .args(args)
+            .current_dir(&project_path)
+            .output()
+            .unwrap()
+    };
+
+    let output = run_format(&["--check"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("broken.clar:2:11: expected closing ')'"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("deleted.clar: "), "{stderr}");
+    assert!(
+        stderr.contains("2 files could not be read or parsed"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("1 file needs formatting"), "{stderr}");
+    assert!(stderr.contains("unformatted.clar"), "{stderr}");
+
+    let output = run_format(&["--in-place"]);
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("2 files could not be read or parsed"),
+        "{stderr}"
+    );
+    assert_eq!(
+        fs::read_to_string(contracts.join("broken.clar")).unwrap(),
+        broken_code
+    );
+
+    assert_eq!(
+        fs::read_to_string(contracts.join("unformatted.clar")).unwrap(),
+        indoc! {"
+            (define-public (g)
+              (ok u2)
+            )
+        "}
+    );
+}
+
 /// Run `clarinet check` with JSON output in the given directory and return the parsed JSON.
 #[track_caller]
 fn run_clarinet_check_json(args: &[&str], working_dir: &Path) -> serde_json::Value {
