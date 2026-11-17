@@ -17,7 +17,7 @@ use ls_types::{
 };
 use regex::Regex;
 
-use super::helpers::{get_function_at_position, is_position_within_span};
+use super::helpers::{column_to_byte, get_function_at_position, is_position_within_span};
 
 const fn version_to_index(version: ClarityVersion) -> usize {
     match version {
@@ -514,11 +514,11 @@ pub fn build_completion_item_list(
 
 pub fn check_if_should_wrap(source: &str, position: &Position) -> bool {
     if let Some(line) = source.lines().nth(position.line as usize) {
-        if position.character as usize > line.len() {
+        if position.character as usize > line.encode_utf16().count() {
             return false;
         }
 
-        let mut chars = line[..position.character as usize].chars();
+        let mut chars = line[..column_to_byte(line, position.character)].chars();
         while let Some(char) = chars.next_back() {
             match char {
                 '(' => return false,
@@ -998,5 +998,23 @@ mod populate_snippet_with_options_tests {
             snippet,
             Some("nft-mint? ${1|bitcoin-nft|} ${2:asset-identifier} ${3:recipient}".to_string())
         );
+    }
+}
+
+#[cfg(test)]
+mod check_if_should_wrap_tests {
+    use ls_types::Position;
+
+    use super::check_if_should_wrap;
+
+    #[test]
+    fn column_after_a_non_ascii_character() {
+        // "é" is one UTF-16 unit but two UTF-8 bytes
+        let source = ";; café\n(ok";
+        let position = Position {
+            line: 0,
+            character: 7,
+        };
+        assert!(check_if_should_wrap(source, &position));
     }
 }

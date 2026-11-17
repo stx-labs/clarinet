@@ -14,6 +14,7 @@ use ls_types::{
 use serde::{Deserialize, Serialize};
 
 use super::requests::capabilities::{get_capabilities, InitializationOptions};
+use super::requests::helpers::column_to_byte;
 use crate::state::{build_state, EditorState, ProtocolState};
 use crate::utils::get_contract_location;
 
@@ -560,10 +561,8 @@ pub fn process_request(
             let range_text = if start_line == end_line {
                 // Single line selection
                 let line = lines.get(start_line).unwrap_or(&"");
-                let start_char = param.range.start.character as usize;
-                let end_char = param.range.end.character as usize;
-                let start_char = start_char.min(line.len());
-                let end_char = end_char.min(line.len());
+                let start_char = column_to_byte(line, param.range.start.character);
+                let end_char = column_to_byte(line, param.range.end.character);
 
                 if start_char >= end_char {
                     return Ok(LspRequestResponse::DocumentRangeFormatting(None));
@@ -575,7 +574,7 @@ pub fn process_request(
 
                 // First line (might be partial)
                 if let Some(first_line) = lines.get(start_line) {
-                    let start_char = (param.range.start.character as usize).min(first_line.len());
+                    let start_char = column_to_byte(first_line, param.range.start.character);
                     result.push_str(&first_line[start_char..]);
                 }
 
@@ -590,7 +589,7 @@ pub fn process_request(
                 // Last line (might be partial) - only if end_line is different from start_line
                 if end_line > start_line && end_line < lines.len() {
                     if let Some(last_line) = lines.get(end_line) {
-                        let end_char = (param.range.end.character as usize).min(last_line.len());
+                        let end_char = column_to_byte(last_line, param.range.end.character);
                         result.push('\n');
                         result.push_str(&last_line[..end_char]);
                     }
@@ -765,6 +764,43 @@ mod lsp_tests {
                 end: Position {
                     line: 6,
                     character: 2,
+                },
+            },
+            options: FormattingOptions {
+                tab_size: 2,
+                insert_spaces: true,
+                properties: HashMap::new(),
+                trim_trailing_whitespace: None,
+                insert_final_newline: None,
+                trim_final_newlines: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams {
+                work_done_token: None,
+            },
+        };
+        let request = LspRequest::DocumentRangeFormatting(params);
+        assert!(process_request(request, &editor_state_input).is_ok());
+    }
+
+    #[test]
+    fn test_range_formatting_after_non_ascii() {
+        // "é" is one UTF-16 unit but two UTF-8 bytes, so the selection's end
+        // column is not a byte offset into the line
+        let source = "(define-constant a   u1) ;; café";
+        let editor_state_input = create_test_editor_state(source.to_owned());
+        let end = source.encode_utf16().count() as u32;
+        let params = DocumentRangeFormattingParams {
+            text_document: TextDocumentIdentifier {
+                uri: "file:///test.clar".parse().unwrap(),
+            },
+            range: Range {
+                start: Position {
+                    line: 0,
+                    character: 0,
+                },
+                end: Position {
+                    line: 0,
+                    character: end,
                 },
             },
             options: FormattingOptions {
