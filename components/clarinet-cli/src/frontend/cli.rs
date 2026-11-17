@@ -202,7 +202,7 @@ enum FormatterInputSource {
 }
 
 struct FormattedSource {
-    original: String,
+    changed: bool,
     formatted: String,
 }
 
@@ -233,7 +233,7 @@ impl FormatterInputSource {
             }
         })?;
         Ok(FormattedSource {
-            original,
+            changed: original != formatted,
             formatted,
         })
     }
@@ -1543,21 +1543,19 @@ pub fn main() {
             let mut failed_files = 0;
 
             for source in sources {
-                let FormattedSource {
-                    original,
-                    formatted,
-                } = match source.read_and_format(&formatter) {
-                    Ok(result) => result,
-                    Err(error) => {
-                        eprintln!("{} {error}", red!("✗"));
-                        failed_files += 1;
-                        continue;
-                    }
-                };
+                let FormattedSource { changed, formatted } =
+                    match source.read_and_format(&formatter) {
+                        Ok(result) => result,
+                        Err(error) => {
+                            eprintln!("{} {error}", red!("✗"));
+                            failed_files += 1;
+                            continue;
+                        }
+                    };
 
                 if cmd.check {
                     if let Some(file_path) = source.file_path() {
-                        if original != formatted {
+                        if changed {
                             all_files_formatted = false;
                             unformatted_files.push(file_path.to_string());
                         }
