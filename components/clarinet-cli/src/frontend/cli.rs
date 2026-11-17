@@ -1538,7 +1538,6 @@ pub fn main() {
             }
             let formatter = ClarityFormatter::new(settings);
 
-            let mut all_files_formatted = true;
             let mut unformatted_files = Vec::new();
             let mut failed_files = 0;
 
@@ -1554,11 +1553,8 @@ pub fn main() {
                     };
 
                 if cmd.check {
-                    if let Some(file_path) = source.file_path() {
-                        if changed {
-                            all_files_formatted = false;
-                            unformatted_files.push(file_path.to_string());
-                        }
+                    if changed {
+                        unformatted_files.extend(source.file_path().map(String::from));
                     }
                 } else if cmd.in_place {
                     let file_path = source
@@ -1575,39 +1571,36 @@ pub fn main() {
 
             if failed_files > 0 {
                 eprintln!(
-                    "{} {failed_files} {} could not be read or parsed",
+                    "{} {} could not be read or parsed",
                     red!("✗"),
-                    if failed_files == 1 { "file" } else { "files" }
+                    pluralize!(failed_files, "file")
                 );
             }
 
-            if cmd.check {
-                if all_files_formatted {
-                    if failed_files > 0 {
-                        std::process::exit(1);
+            if !unformatted_files.is_empty() {
+                eprintln!(
+                    "{} {} {} formatting",
+                    red!("✗"),
+                    unformatted_files.len(),
+                    if unformatted_files.len() == 1 {
+                        "file needs"
+                    } else {
+                        "files need"
                     }
-                    println!("{} All files are properly formatted", green!("✔"));
-                    std::process::exit(0);
-                } else {
-                    eprintln!(
-                        "{} {} {} formatting",
-                        red!("✗"),
-                        unformatted_files.len(),
-                        if unformatted_files.len() == 1 {
-                            "file needs"
-                        } else {
-                            "files need"
-                        }
-                    );
-                    for file in unformatted_files {
-                        eprintln!("  {file}");
-                    }
-                    std::process::exit(1);
+                );
+                for file in unformatted_files {
+                    eprintln!("  {file}");
                 }
+                std::process::exit(1);
             }
 
             if failed_files > 0 {
                 std::process::exit(1);
+            }
+
+            if cmd.check {
+                println!("{} All files are properly formatted", green!("✔"));
+                std::process::exit(0);
             }
         }
         Command::Devnet(subcommand) => match subcommand {
