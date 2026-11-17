@@ -6,13 +6,13 @@ mod sequence;
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::ops::Deref;
-use std::{fmt, slice};
+use std::{fmt, iter, slice, vec};
 
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::parser;
 use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
-use clarity::vm::diagnostic::Diagnostic;
+use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span};
@@ -123,18 +123,19 @@ impl ClarityFormatter {
         &self,
         source: &str,
         epoch: Option<StacksEpochId>,
-    ) -> Result<String, Diagnostic> {
+    ) -> Result<String, ParseFailure> {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
-        let pse = parse(trimmed_source, epoch).map_err(|mut diagnostic| {
-            // Count the lines trimmed off so the position matches the file
+        let pse = parse(trimmed_source, epoch).map_err(|mut failure| {
+            // Count the lines trimmed off so positions match the file
             let trimmed_lines = source[..source.len() - trimmed_source.len()]
                 .matches('\n')
                 .count() as u32;
-            for span in &mut diagnostic.spans {
+            let diagnostics = iter::once(&mut failure.error).chain(&mut failure.notes);
+            for span in diagnostics.flat_map(|diagnostic| &mut diagnostic.spans) {
                 span.start_line += trimmed_lines;
                 span.end_line += trimmed_lines;
             }
-            diagnostic
+            failure
         })?;
         let mut agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
         let result = agg.generate();
@@ -148,7 +149,11 @@ impl ClarityFormatter {
         agg.generate()
     }
     /// Alias `format_file` to `format`
-    pub fn format(&self, source: &str, epoch: Option<StacksEpochId>) -> Result<String, Diagnostic> {
+    pub fn format(
+        &self,
+        source: &str,
+        epoch: Option<StacksEpochId>,
+    ) -> Result<String, ParseFailure> {
         self.format_file(source, epoch)
     }
     /// for range formatting within editors
@@ -156,7 +161,7 @@ impl ClarityFormatter {
         &self,
         source: &str,
         epoch: Option<StacksEpochId>,
-    ) -> Result<String, Diagnostic> {
+    ) -> Result<String, ParseFailure> {
         let pse = parse(source, epoch)?;
 
         // range formatting specifies to the aggregator that we're
@@ -175,17 +180,41 @@ impl ClarityFormatter {
     }
 }
 
+/// Why a source couldn't be parsed: the first error, and the notes after it,
+/// such as where the `(` an `expected closing ')'` error needs to match is.
+#[derive(Debug)]
+pub struct ParseFailure {
+    pub error: Diagnostic,
+    pub notes: Vec<Diagnostic>,
+}
+
+impl IntoIterator for ParseFailure {
+    type Item = Diagnostic;
+    type IntoIter = iter::Chain<iter::Once<Diagnostic>, vec::IntoIter<Diagnostic>>;
+
+    /// The error, then its notes, in the order the parser reported them
+    fn into_iter(self) -> Self::IntoIter {
+        iter::once(self.error).chain(self.notes)
+    }
+}
+
 /// Parses `source`, rejecting it at the first diagnostic of any level, as a
 /// node's fail-fast parser does. Collecting diagnostics keeps the error's
 /// position, which the fail-fast parser drops.
 fn parse(
     source: &str,
     epoch: Option<StacksEpochId>,
-) -> Result<Vec<PreSymbolicExpression>, Diagnostic> {
+) -> Result<Vec<PreSymbolicExpression>, ParseFailure> {
     let depth_limits = StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH));
     let (pse, diagnostics, _) = parser::v2::parse_collect_diagnostics(source, depth_limits);
-    match diagnostics.into_iter().next() {
-        Some(diagnostic) => Err(diagnostic),
+    let mut diagnostics = diagnostics.into_iter();
+    match diagnostics.next() {
+        Some(error) => Err(ParseFailure {
+            error,
+            notes: diagnostics
+                .take_while(|diagnostic| diagnostic.level == Level::Note)
+                .collect(),
+        }),
         None => Ok(pse),
     }
 }
@@ -1809,6 +1838,23 @@ mod tests_formatter {
             assert!(formatter.format_file(src, None).is_err(), "{src}");
             assert!(formatter.format_section(src, None).is_err(), "{src}");
         }
+    }
+
+    #[test]
+    fn test_format_file_reports_parse_error_notes() {
+        let formatter = ClarityFormatter::new(Settings::default());
+        // The leading newline is trimmed before parsing, but positions match the file
+        let failure = formatter
+            .format_file("\n(define-constant a u1", None)
+            .unwrap_err();
+        assert_eq!(failure.error.message, "expected closing ')'");
+        assert_eq!(failure.error.spans[0].start_line, 2);
+        let [note] = failure.notes.as_slice() else {
+            panic!("expected one note: {:?}", failure.notes);
+        };
+        assert_eq!(note.message, "to match this '('");
+        assert_eq!(note.spans[0].start_line, 2);
+        assert_eq!(note.spans[0].start_column, 1);
     }
 
     #[test]

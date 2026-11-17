@@ -226,9 +226,15 @@ impl FormatterInputSource {
             .map_err(|e| format_err!(format!("unable to read file: '{name}': {e}")))?;
         let formatted = formatter
             .format(&original, self.epoch())
-            .map_err(|diagnostic| {
+            .map_err(|failure| {
                 let lines: Vec<String> = original.lines().map(String::from).collect();
-                output_diagnostic(&LintDiagnostic::from(diagnostic), name, &lines).join("\n")
+                failure
+                    .into_iter()
+                    .flat_map(|diagnostic| {
+                        output_diagnostic(&LintDiagnostic::from(diagnostic), name, &lines)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
             })?;
         Ok(FormattedSource {
             changed: original != formatted,
