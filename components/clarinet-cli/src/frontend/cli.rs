@@ -27,7 +27,7 @@ use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::costs::LimitedCostTracker;
-use clarity::vm::diagnostic::Level;
+use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
@@ -1518,17 +1518,28 @@ pub fn main() {
             let mut failed_files = 0;
 
             for source in sources {
+                let name = source.file_path().unwrap_or("<stdin>");
                 // A contract that can't be read or doesn't parse is reported,
                 // and the rest are still formatted.
                 let formatted = source
                     .get_input()
-                    .map_err(|e| e.to_string())
-                    .and_then(|input| Ok((formatter.format(&input, source.epoch())?, input)));
+                    .map_err(|e| format!("{name}: {e}"))
+                    .and_then(|input| {
+                        let output = formatter.format(&input, source.epoch()).map_err(
+                            |Diagnostic { message, spans, .. }| match spans.first() {
+                                Some(span) => format!(
+                                    "{name}:{}:{}: {message}",
+                                    span.start_line, span.start_column
+                                ),
+                                None => format!("{name}: {message}"),
+                            },
+                        )?;
+                        Ok((output, input))
+                    });
                 let (output, input) = match formatted {
                     Ok(formatted) => formatted,
                     Err(error) => {
-                        let name = source.file_path().unwrap_or("<stdin>");
-                        eprintln!("{} {name}: {error}", red!("✗"));
+                        eprintln!("{} {error}", red!("✗"));
                         failed_files += 1;
                         continue;
                     }

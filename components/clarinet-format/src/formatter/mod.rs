@@ -10,7 +10,9 @@ use std::{fmt, slice};
 
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::types::StacksEpochId;
+use clarity::vm::ast::parser;
 use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
+use clarity::vm::diagnostic::Diagnostic;
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span};
@@ -121,13 +123,19 @@ impl ClarityFormatter {
         &self,
         source: &str,
         epoch: Option<StacksEpochId>,
-    ) -> Result<String, String> {
+    ) -> Result<String, Diagnostic> {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
-        let pse = clarity::vm::ast::parser::v2::parse(
-            trimmed_source,
-            StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH)),
-        )
-        .map_err(|e| e.to_string())?;
+        let pse = parse(trimmed_source, epoch).map_err(|mut diagnostic| {
+            // Count the lines trimmed off so the position matches the file
+            let trimmed_lines = source[..source.len() - trimmed_source.len()]
+                .matches('\n')
+                .count() as u32;
+            for span in &mut diagnostic.spans {
+                span.start_line += trimmed_lines;
+                span.end_line += trimmed_lines;
+            }
+            diagnostic
+        })?;
         let mut agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
         let result = agg.generate();
 
@@ -140,7 +148,7 @@ impl ClarityFormatter {
         agg.generate()
     }
     /// Alias `format_file` to `format`
-    pub fn format(&self, source: &str, epoch: Option<StacksEpochId>) -> Result<String, String> {
+    pub fn format(&self, source: &str, epoch: Option<StacksEpochId>) -> Result<String, Diagnostic> {
         self.format_file(source, epoch)
     }
     /// for range formatting within editors
@@ -148,12 +156,8 @@ impl ClarityFormatter {
         &self,
         source: &str,
         epoch: Option<StacksEpochId>,
-    ) -> Result<String, String> {
-        let pse = clarity::vm::ast::parser::v2::parse(
-            source,
-            StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH)),
-        )
-        .map_err(|e| e.to_string())?;
+    ) -> Result<String, Diagnostic> {
+        let pse = parse(source, epoch)?;
 
         // range formatting specifies to the aggregator that we're
         // starting mid-source and thus should pre-populate
@@ -169,6 +173,20 @@ impl ClarityFormatter {
             format!("{leading_spaces}{result}")
         })
     }
+}
+
+/// Parses `source` with the parser a node uses, which stops at the first
+/// diagnostic but drops its position. On failure, `source` is parsed again,
+/// collecting diagnostics, to put a line and column on the error.
+fn parse(
+    source: &str,
+    epoch: Option<StacksEpochId>,
+) -> Result<Vec<PreSymbolicExpression>, Diagnostic> {
+    let depth_limits = StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH));
+    parser::v2::parse(source, depth_limits).map_err(|error| {
+        let (_, diagnostics, _) = parser::v2::parse_collect_diagnostics(source, depth_limits);
+        diagnostics.into_iter().next().unwrap_or(error.diagnostic)
+    })
 }
 
 /// Aggregator does the heavy lifting and generates the final output string.
