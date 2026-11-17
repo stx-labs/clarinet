@@ -324,6 +324,28 @@ fn test_formatter_check() {
 }
 
 #[test]
+fn test_formatter_reports_stdin_read_error() {
+    let project_name = "test_formatter_stdin";
+    let temp_dir = create_new_project(project_name);
+    let input = temp_dir.path().join("input.clar");
+    fs::write(&input, b"(ok u1)\n\xff").unwrap();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["format", "--stdin"])
+        .current_dir(temp_dir.path().join(project_name))
+        .stdin(fs::File::open(input).unwrap())
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unable to read file: '<stdin>'"),
+        "{stderr}"
+    );
+}
+
+#[test]
 fn test_formatter_continues_after_failed_files() {
     let project_name = "test_formatter_continues";
     let temp_dir = create_new_project(project_name);

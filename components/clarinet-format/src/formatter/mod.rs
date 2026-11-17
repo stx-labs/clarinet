@@ -126,12 +126,18 @@ impl ClarityFormatter {
     ) -> Result<String, ParseFailure> {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
         let pse = parse(trimmed_source, epoch).map_err(|mut failure| {
-            // Count the lines trimmed off so positions match the file
-            let trimmed_lines = source[..source.len() - trimmed_source.len()]
-                .matches('\n')
-                .count() as u32;
+            let prefix = &source[..source.len() - trimmed_source.len()];
+            let trimmed_lines = prefix.matches('\n').count() as u32;
+            // Bare carriage returns after the last newline occupy columns on the first parsed line.
+            let trimmed_columns = prefix.bytes().rev().take_while(|&b| b == b'\r').count() as u32;
             let diagnostics = iter::once(&mut failure.error).chain(&mut failure.notes);
             for span in diagnostics.flat_map(|diagnostic| &mut diagnostic.spans) {
+                if span.start_line == 1 {
+                    span.start_column += trimmed_columns;
+                }
+                if span.end_line == 1 {
+                    span.end_column += trimmed_columns;
+                }
                 span.start_line += trimmed_lines;
                 span.end_line += trimmed_lines;
             }
@@ -1854,6 +1860,22 @@ mod tests_formatter {
         assert_eq!(note.message, "to match this '('");
         assert_eq!(note.spans[0].start_line, 2);
         assert_eq!(note.spans[0].start_column, 1);
+    }
+
+    #[test]
+    fn test_format_file_restores_columns_after_leading_carriage_returns() {
+        let formatter = ClarityFormatter::new(Settings::default());
+        let failure = formatter.format_file("\r\n\r\r(ok\n u1", None).unwrap_err();
+        let opening = &failure.notes[0].spans[0];
+        assert_eq!(
+            (opening.start_line, opening.start_column, opening.end_column),
+            (2, 3, 3)
+        );
+        let closing = &failure.error.spans[0];
+        assert_eq!(
+            (closing.start_line, closing.start_column, closing.end_column),
+            (3, 4, 4)
+        );
     }
 
     #[test]

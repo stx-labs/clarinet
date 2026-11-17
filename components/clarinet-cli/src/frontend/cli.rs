@@ -212,8 +212,7 @@ impl FormatterInputSource {
             FormatterInputSource::File(path, _) => fs::read_to_string(path),
             FormatterInputSource::Stdin => Ok(io::stdin()
                 .lines()
-                .map_while(Result::ok)
-                .collect::<Vec<_>>()
+                .collect::<io::Result<Vec<_>>>()?
                 .join("\n")),
         }
     }
