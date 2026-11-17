@@ -133,6 +133,12 @@ fn eval_is_quiet_and_stops_on_the_first_error() {
     for (args, stdout, success, error) in [
         (vec!["-e", "(+ 1 1)"], "2\n", true, ""),
         (
+            vec!["-e", "(+ 1 1)", "-e", "::reload", "-e", "(+ 2 2)"],
+            "2\n4\n",
+            true,
+            "",
+        ),
+        (
             vec!["--eval", "(+ 1 1)", "-e", "(+ 1 u1)", "-e", "(+ 2 2)"],
             "2\n",
             false,
@@ -244,6 +250,21 @@ fn eval_uses_one_project_session_and_routes_startup_diagnostics() {
         .unwrap()
         .status
         .success());
+    let other = project.join("contracts/other.clar");
+    let other_source = std::fs::read_to_string(&other).unwrap();
+    std::fs::remove_file(&other).unwrap();
+    let output = Command::new(clarinet)
+        .args(["console", "-e", "(+ 1 1)"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("other.clar"), "{stderr}");
+    assert!(stderr.contains("error:"), "{stderr}");
+    std::fs::write(&other, other_source).unwrap();
+
     let output = Command::new(clarinet)
         .args(["console", "-e", "(+ 1 1)"])
         .current_dir(&project)
@@ -276,6 +297,7 @@ fn eval_command_errors_stop_evaluation() {
         "::advance_chain_tip invalid",
         "::set_epoch invalid",
         "::unknown",
+        "::reload_typo",
         "::read missing.clar",
         "::encode (+ 1 u1)",
         "::decode invalid",

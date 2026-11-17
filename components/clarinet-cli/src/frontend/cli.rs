@@ -1205,7 +1205,7 @@ pub fn main() {
                 } else {
                     let mut reload = false;
                     for expression in expressions.by_ref() {
-                        if expression.starts_with("::reload") {
+                        if expression == "::reload" {
                             reload = true;
                             break;
                         }
@@ -1967,6 +1967,7 @@ fn load_deployment_if_exists(
                     Ok(Some(deployment))
                 }
             }
+            Err(message) if force_computed => Err(message),
             Err(message) => {
                 eprintln!(
                     "{} unable to compute an updated plan\n{}",
