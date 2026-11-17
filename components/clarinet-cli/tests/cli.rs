@@ -339,10 +339,35 @@ fn test_formatter_reports_stdin_read_error() {
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
     let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unable to read stdin: "), "{stderr}");
+}
+
+#[test]
+fn test_formatter_requires_mode_flag() {
+    let project_name = "test_formatter_mode_flag";
+    let temp_dir = create_new_project(project_name);
+    let project_path = temp_dir.path().join(project_name);
+    let status = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["contract", "new", "broken"])
+        .current_dir(&project_path)
+        .status()
+        .unwrap();
+    assert!(status.success());
+    fs::write(project_path.join("contracts/broken.clar"), "(ok").unwrap();
+
+    // The missing flag is reported even when no contract parses
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .arg("format")
+        .current_dir(&project_path)
+        .output()
+        .unwrap();
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(
-        stderr.contains("unable to read file: '<stdin>'"),
+        stderr.contains("required flags: in-place, dry-run, or check"),
         "{stderr}"
     );
+    assert!(!stderr.contains("could not be read or parsed"), "{stderr}");
 }
 
 #[test]

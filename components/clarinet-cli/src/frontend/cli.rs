@@ -220,9 +220,12 @@ impl FormatterInputSource {
     /// Read or parse failures are rendered as `clarinet check` renders them.
     fn read_and_format(&self, formatter: &ClarityFormatter) -> Result<FormattedSource, String> {
         let name = self.file_path().unwrap_or("<stdin>");
-        let original = self
-            .get_input()
-            .map_err(|e| format_err!(format!("unable to read file: '{name}': {e}")))?;
+        let original = self.get_input().map_err(|e| {
+            format_err!(match self.file_path() {
+                Some(path) => format!("unable to read file: '{path}': {e}"),
+                None => format!("unable to read stdin: {e}"),
+            })
+        })?;
         let formatted = formatter
             .format(&original, self.epoch())
             .map_err(|failure| {
@@ -253,10 +256,6 @@ impl FormatterInputSource {
             FormatterInputSource::File(_, epoch) => *epoch,
             FormatterInputSource::Stdin => None,
         }
-    }
-
-    fn is_stdin(&self) -> bool {
-        matches!(self, FormatterInputSource::Stdin)
     }
 }
 
@@ -1525,6 +1524,10 @@ pub fn main() {
                 "{}",
                 format_warn!("This command is in beta. Feedback is welcome!"),
             );
+            if !(cmd.check || cmd.in_place || cmd.dry_run || cmd.stdin) {
+                eprintln!("required flags: in-place, dry-run, or check");
+                std::process::exit(1);
+            }
             let manifest = load_manifest_or_exit(cmd.manifest_path.clone(), false);
             let sources = cmd.get_input_sources(&manifest);
             let mut settings = formatter::Settings::default();
@@ -1564,11 +1567,8 @@ pub fn main() {
                         .file_path()
                         .expect("No file path for in-place formatting");
                     let _ = overwrite_formatted(file_path, &formatted);
-                } else if cmd.dry_run || source.is_stdin() {
-                    println!("{formatted}");
                 } else {
-                    eprintln!("required flags: in-place, dry-run, or check");
-                    std::process::exit(1);
+                    println!("{formatted}");
                 }
             }
 
