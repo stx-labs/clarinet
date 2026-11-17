@@ -175,18 +175,19 @@ impl ClarityFormatter {
     }
 }
 
-/// Parses `source` with the parser a node uses, which stops at the first
-/// diagnostic but drops its position. On failure, `source` is parsed again,
-/// collecting diagnostics, to put a line and column on the error.
+/// Parses `source`, rejecting it at the first diagnostic of any level, as a
+/// node's fail-fast parser does. Collecting diagnostics keeps the error's
+/// position, which the fail-fast parser drops.
 fn parse(
     source: &str,
     epoch: Option<StacksEpochId>,
 ) -> Result<Vec<PreSymbolicExpression>, Diagnostic> {
     let depth_limits = StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH));
-    parser::v2::parse(source, depth_limits).map_err(|error| {
-        let (_, diagnostics, _) = parser::v2::parse_collect_diagnostics(source, depth_limits);
-        diagnostics.into_iter().next().unwrap_or(error.diagnostic)
-    })
+    let (pse, diagnostics, _) = parser::v2::parse_collect_diagnostics(source, depth_limits);
+    match diagnostics.into_iter().next() {
+        Some(diagnostic) => Err(diagnostic),
+        None => Ok(pse),
+    }
 }
 
 /// Aggregator does the heavy lifting and generates the final output string.
