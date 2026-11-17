@@ -27,7 +27,7 @@ use clarinet_format::formatter::{self, ClarityFormatter};
 use clarity::types::StacksEpochId;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::costs::LimitedCostTracker;
-use clarity::vm::diagnostic::{Diagnostic, Level};
+use clarity::vm::diagnostic::Level;
 use clarity::vm::types::QualifiedContractIdentifier;
 use clarity::vm::ClarityVersion;
 use clarity_lsp::state::Environment;
@@ -201,6 +201,11 @@ enum FormatterInputSource {
     Stdin,
 }
 
+struct FormattedSource {
+    original: String,
+    formatted: String,
+}
+
 impl FormatterInputSource {
     fn get_input(&self) -> io::Result<String> {
         match self {
@@ -211,6 +216,26 @@ impl FormatterInputSource {
                 .collect::<Vec<_>>()
                 .join("\n")),
         }
+    }
+
+    /// Read or parse failures include the source name and, when available, the error location.
+    fn read_and_format(&self, formatter: &ClarityFormatter) -> Result<FormattedSource, String> {
+        let name = self.file_path().unwrap_or("<stdin>");
+        let original = self.get_input().map_err(|e| format!("{name}: {e}"))?;
+        let formatted = formatter.format(&original, self.epoch()).map_err(|error| {
+            let message = error.message;
+            match error.spans.first() {
+                Some(span) => format!(
+                    "{name}:{}:{}: {message}",
+                    span.start_line, span.start_column
+                ),
+                None => format!("{name}: {message}"),
+            }
+        })?;
+        Ok(FormattedSource {
+            original,
+            formatted,
+        })
     }
 
     fn file_path(&self) -> Option<&str> {
@@ -1518,26 +1543,11 @@ pub fn main() {
             let mut failed_files = 0;
 
             for source in sources {
-                let name = source.file_path().unwrap_or("<stdin>");
-                // A contract that can't be read or doesn't parse is reported,
-                // and the rest are still formatted.
-                let formatted = source
-                    .get_input()
-                    .map_err(|e| format!("{name}: {e}"))
-                    .and_then(|input| {
-                        let output = formatter.format(&input, source.epoch()).map_err(
-                            |Diagnostic { message, spans, .. }| match spans.first() {
-                                Some(span) => format!(
-                                    "{name}:{}:{}: {message}",
-                                    span.start_line, span.start_column
-                                ),
-                                None => format!("{name}: {message}"),
-                            },
-                        )?;
-                        Ok((output, input))
-                    });
-                let (output, input) = match formatted {
-                    Ok(formatted) => formatted,
+                let FormattedSource {
+                    original,
+                    formatted,
+                } = match source.read_and_format(&formatter) {
+                    Ok(result) => result,
                     Err(error) => {
                         eprintln!("{} {error}", red!("✗"));
                         failed_files += 1;
@@ -1547,7 +1557,7 @@ pub fn main() {
 
                 if cmd.check {
                     if let Some(file_path) = source.file_path() {
-                        if input != output {
+                        if original != formatted {
                             all_files_formatted = false;
                             unformatted_files.push(file_path.to_string());
                         }
@@ -1556,9 +1566,9 @@ pub fn main() {
                     let file_path = source
                         .file_path()
                         .expect("No file path for in-place formatting");
-                    let _ = overwrite_formatted(file_path, &output);
+                    let _ = overwrite_formatted(file_path, &formatted);
                 } else if cmd.dry_run || source.is_stdin() {
-                    println!("{output}");
+                    println!("{formatted}");
                 } else {
                     eprintln!("required flags: in-place, dry-run, or check");
                     std::process::exit(1);
