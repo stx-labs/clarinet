@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::prelude::*;
-use std::io::{self};
+use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
 use std::{env, process};
 
@@ -472,6 +472,10 @@ struct ApplyDeployment {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct Console {
+    /// Evaluate an expression and exit (repeatable)
+    #[clap(long = "eval", short = 'e', value_name = "expr")]
+    pub eval: Vec<String>,
+
     /// Path to Clarinet.toml
     #[clap(long = "manifest-path", short = 'm')]
     pub manifest_path: Option<String>,
@@ -581,6 +585,10 @@ struct Completions {
 }
 
 pub fn main() {
+    if !io::stdout().is_terminal() {
+        colored::control::set_override(false);
+    }
+
     let opts: Opts = match Opts::try_parse() {
         Ok(opts) => opts,
         Err(e) => {
@@ -1131,9 +1139,15 @@ pub fn main() {
             }
         },
         Command::Console(cmd) => {
+            let mut expressions = cmd.eval.iter();
             // Loop to handle `::reload` command
             loop {
-                let manifest = load_manifest_or_warn(cmd.manifest_path.clone());
+                let mut manifest = load_manifest_or_warn(cmd.manifest_path.clone());
+                if !cmd.eval.is_empty() {
+                    if let Some(manifest) = &mut manifest {
+                        manifest.repl_settings.show_timings = false;
+                    }
+                }
 
                 let mut terminal = match manifest {
                     Some(ref manifest) => {
@@ -1141,28 +1155,35 @@ pub fn main() {
                             manifest,
                             &cmd.deployment_plan_path,
                             cmd.use_on_disk_deployment_plan,
-                            cmd.use_computed_deployment_plan,
+                            cmd.use_computed_deployment_plan
+                                || (!cmd.eval.is_empty() && !cmd.use_on_disk_deployment_plan),
                             false,
                             Environment::Simnet,
                         );
 
-                        if !artifacts.success {
+                        if !artifacts.success || !cmd.eval.is_empty() {
                             let diags_digest = DiagnosticsDigest::new(
                                 &artifacts.diags,
                                 &artifacts.lint_diags,
                                 &deployment,
                             );
                             if diags_digest.has_feedbacks() {
-                                println!("{}", diags_digest.message);
+                                if cmd.eval.is_empty() {
+                                    println!("{}", diags_digest.message);
+                                } else {
+                                    eprintln!("{}", diags_digest.message);
+                                }
                             }
                             if diags_digest.errors > 0 {
-                                println!(
+                                eprintln!(
                                     "{} {} detected",
                                     red!("x"),
                                     pluralize!(diags_digest.errors, "error")
                                 );
                             }
-                            std::process::exit(1);
+                            if !artifacts.success {
+                                std::process::exit(1);
+                            }
                         }
 
                         Terminal::load(artifacts.session)
@@ -1179,7 +1200,21 @@ pub fn main() {
                         Terminal::new(settings)
                     }
                 };
-                let reload = terminal.start();
+                let reload = if cmd.eval.is_empty() {
+                    terminal.start()
+                } else {
+                    let mut reload = false;
+                    for expression in expressions.by_ref() {
+                        if expression.starts_with("::reload") {
+                            reload = true;
+                            break;
+                        }
+                        if terminal.eval(expression).is_err() {
+                            std::process::exit(1);
+                        }
+                    }
+                    reload
+                };
 
                 // Report telemetry
                 if let Some(manifest) = manifest {
@@ -1216,7 +1251,7 @@ pub fn main() {
                 }
             }
 
-            if clarinetrc.enable_hints.unwrap_or(true) {
+            if cmd.eval.is_empty() && clarinetrc.enable_hints.unwrap_or(true) {
                 display_contract_new_hint(None);
             }
         }

@@ -378,11 +378,23 @@ impl Session {
             #[cfg(not(target_arch = "wasm32"))]
             cmd if cmd.starts_with("::debug") => self.debug(&mut output, cmd),
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::trace") => self.trace(&mut output, cmd),
+            cmd if cmd.starts_with("::trace") => {
+                if let Err(errors) = self.trace(&mut output, cmd) {
+                    output.extend(errors);
+                }
+            }
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::perf") => self.perf(&mut output, cmd),
+            cmd if cmd.starts_with("::perf") => {
+                if let Err(errors) = self.perf(&mut output, cmd) {
+                    output.extend(errors);
+                }
+            }
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::get_costs") => self.get_costs(&mut output, cmd),
+            cmd if cmd.starts_with("::get_costs") => {
+                if let Err(errors) = self.get_costs(&mut output, cmd) {
+                    output.extend(errors);
+                }
+            }
 
             cmd if cmd.starts_with("::") => {
                 output.push(self.handle_command(cmd));
@@ -398,32 +410,37 @@ impl Session {
     }
 
     pub fn handle_command(&mut self, command: &str) -> String {
+        self.handle_command_result(command)
+            .unwrap_or_else(|error| error)
+    }
+
+    pub(crate) fn handle_command_result(&mut self, command: &str) -> Result<String, String> {
         match command {
-            "::help" => self.display_help(),
+            "::help" => Ok(self.display_help()),
 
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::functions") => self.display_functions(),
+            cmd if cmd.starts_with("::functions") => Ok(self.display_functions()),
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::keywords") => self.keywords(),
+            cmd if cmd.starts_with("::keywords") => Ok(self.keywords()),
             #[cfg(not(target_arch = "wasm32"))]
             cmd if cmd.starts_with("::describe") => self.display_doc(cmd),
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::toggle_costs") => self.toggle_costs(),
+            cmd if cmd.starts_with("::toggle_costs") => Ok(self.toggle_costs()),
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::toggle_timings") => self.toggle_timings(),
+            cmd if cmd.starts_with("::toggle_timings") => Ok(self.toggle_timings()),
 
             cmd if cmd.starts_with("::mint_stx") => self.mint_stx(cmd),
             cmd if cmd.starts_with("::mint_ft") => self.mint_ft(cmd),
             cmd if cmd.starts_with("::set_tx_sender") => self.parse_and_set_tx_sender(cmd),
-            cmd if cmd.starts_with("::get_assets_maps") => self
+            cmd if cmd.starts_with("::get_assets_maps") => Ok(self
                 .get_accounts()
-                .unwrap_or_else(|| "No account found".into()),
-            cmd if cmd.starts_with("::get_contracts") => self
+                .unwrap_or_else(|| "No account found".into())),
+            cmd if cmd.starts_with("::get_contracts") => Ok(self
                 .get_contracts()
-                .unwrap_or_else(|| "No contract found".into()),
-            cmd if cmd.starts_with("::get_burn_block_height") => self.get_burn_block_height(),
-            cmd if cmd.starts_with("::get_stacks_block_height") => self.get_block_height(),
-            cmd if cmd.starts_with("::get_block_height") => self.get_block_height(),
+                .unwrap_or_else(|| "No contract found".into())),
+            cmd if cmd.starts_with("::get_burn_block_height") => Ok(self.get_burn_block_height()),
+            cmd if cmd.starts_with("::get_stacks_block_height") => Ok(self.get_block_height()),
+            cmd if cmd.starts_with("::get_block_height") => Ok(self.get_block_height()),
             cmd if cmd.starts_with("::advance_chain_tip") => self.parse_and_advance_chain_tip(cmd),
             cmd if cmd.starts_with("::advance_stacks_chain_tip") => {
                 self.parse_and_advance_stacks_chain_tip(cmd)
@@ -431,12 +448,12 @@ impl Session {
             cmd if cmd.starts_with("::advance_burn_chain_tip") => {
                 self.parse_and_advance_burn_chain_tip(cmd)
             }
-            cmd if cmd.starts_with("::get_epoch") => self.get_epoch(),
-            cmd if cmd.starts_with("::set_epoch") => self.set_epoch(cmd),
-            cmd if cmd.starts_with("::encode") => self.encode(cmd),
-            cmd if cmd.starts_with("::decode") => self.decode(cmd),
+            cmd if cmd.starts_with("::get_epoch") => Ok(self.get_epoch()),
+            cmd if cmd.starts_with("::set_epoch") => self.set_epoch_result(cmd),
+            cmd if cmd.starts_with("::encode") => self.encode_result(cmd),
+            cmd if cmd.starts_with("::decode") => self.decode_result(cmd),
 
-            _ => "Invalid command. Try `::help`".yellow().to_string(),
+            _ => Err("Invalid command. Try `::help`".yellow().to_string()),
         }
     }
 
@@ -650,38 +667,39 @@ impl Session {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn trace(&mut self, output: &mut Vec<String>, cmd: &str) {
+    pub fn trace(&mut self, output: &mut Vec<String>, cmd: &str) -> Result<(), Vec<String>> {
         use super::hooks::tracer::TracerHook;
 
         let Some((_, snippet)) = cmd.split_once(' ') else {
-            return output.push("Usage: ::trace <expr>".red().to_string());
+            return Err(vec!["Usage: ::trace <expr>".red().to_string()]);
         };
         let snippet = &self.remap_user_snippet(snippet.to_string());
 
         let mut tracer = TracerHook::new();
 
-        match self.eval_with_hooks(snippet.to_string(), Some(vec![&mut tracer]), false) {
-            Ok(_) => (),
-            Err(diagnostics) => {
-                let lines = snippet.lines();
-                let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
-                for d in diagnostics {
-                    output.append(&mut output_diagnostic(&d, "<snippet>", &formatted_lines));
-                }
-            }
-        };
-
-        println!("{}  {}", snippet, black!("<console>"));
-        println!("{}", tracer.output.join("\n"));
+        let result = self
+            .eval_with_hooks(snippet.to_string(), Some(vec![&mut tracer]), false)
+            .map_err(|diagnostics| {
+                let formatted_lines = snippet.lines().map(String::from).collect::<Vec<_>>();
+                diagnostics
+                    .iter()
+                    .flat_map(|diagnostic| {
+                        output_diagnostic(diagnostic, "<snippet>", &formatted_lines)
+                    })
+                    .collect()
+            });
+        output.push(format!("{}  {}", snippet, black!("<console>")));
+        output.push(tracer.output.join("\n"));
+        result.map(|_| ())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn perf(&mut self, output: &mut Vec<String>, cmd: &str) {
+    pub fn perf(&mut self, output: &mut Vec<String>, cmd: &str) -> Result<(), Vec<String>> {
         use super::hooks::perf::{CostField, PerfHook};
 
         let parts: Vec<&str> = cmd.split_whitespace().collect();
         if parts.len() < 3 {
-            return output.push("Usage: ::perf <cost_field> <expr>".red().to_string());
+            return Err(vec!["Usage: ::perf <cost_field> <expr>".red().to_string()]);
         }
 
         let cost_field_str = parts[1];
@@ -703,13 +721,16 @@ impl Session {
                 );
             }
             Err(diagnostics) => {
+                let mut errors = vec![];
                 let lines = snippet.lines();
                 let formatted_lines: Vec<String> = lines.map(|l| l.to_string()).collect();
                 for d in diagnostics {
-                    output.append(&mut output_diagnostic(&d, "<snippet>", &formatted_lines));
+                    errors.append(&mut output_diagnostic(&d, "<snippet>", &formatted_lines));
                 }
+                return Err(errors);
             }
         };
+        Ok(())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1358,56 +1379,56 @@ impl Session {
         output.join("\n")
     }
 
-    fn parse_and_advance_chain_tip(&mut self, command: &str) -> String {
+    fn parse_and_advance_chain_tip(&mut self, command: &str) -> Result<String, String> {
         let args: Vec<_> = command.split(' ').skip(1).collect();
         let Ok(count) = args.first().unwrap_or(&"1").parse::<u32>() else {
-            return format!("{}", "Unable to parse count".red());
+            return Err(format!("{}", "Unable to parse count".red()));
         };
 
         let _ = self.advance_chain_tip(count);
-        format!(
+        Ok(format!(
             "new burn height: {}\nnew stacks height: {}",
             self.interpreter.datastore.get_current_burn_block_height(),
             self.interpreter.datastore.get_current_stacks_block_height(),
         )
         .green()
-        .to_string()
+        .to_string())
     }
 
-    fn parse_and_advance_burn_chain_tip(&mut self, command: &str) -> String {
+    fn parse_and_advance_burn_chain_tip(&mut self, command: &str) -> Result<String, String> {
         let args: Vec<_> = command.split(' ').skip(1).collect();
         let Ok(count) = args.first().unwrap_or(&"1").parse::<u32>() else {
-            return format!("{}", "Unable to parse count".red());
+            return Err(format!("{}", "Unable to parse count".red()));
         };
 
         let _ = self.advance_burn_chain_tip(count);
-        format!(
+        Ok(format!(
             "new burn height: {}\nnew stacks height: {}",
             self.interpreter.datastore.get_current_burn_block_height(),
             self.interpreter.datastore.get_current_stacks_block_height(),
         )
         .green()
-        .to_string()
+        .to_string())
     }
 
-    fn parse_and_advance_stacks_chain_tip(&mut self, command: &str) -> String {
+    fn parse_and_advance_stacks_chain_tip(&mut self, command: &str) -> Result<String, String> {
         let args: Vec<_> = command.split(' ').skip(1).collect();
         let Ok(count) = args.first().unwrap_or(&"1").parse::<u32>() else {
-            return format!("{}", "Unable to parse count".red());
+            return Err(format!("{}", "Unable to parse count".red()));
         };
 
         match self.advance_stacks_chain_tip(count) {
-            Ok(_) => format!(
+            Ok(_) => Ok(format!(
                 "new burn height: {}\nnew stacks height: {}",
                 self.interpreter.datastore.get_current_burn_block_height(),
                 self.interpreter.datastore.get_current_stacks_block_height(),
             )
             .green()
-            .to_string(),
-            Err(_) => format!(
+            .to_string()),
+            Err(_) => Err(format!(
                 "{}",
                 "advance_stacks_chain_tip can't be called in epoch lower than 3.0".red()
-            ),
+            )),
         }
     }
 
@@ -1429,11 +1450,11 @@ impl Session {
         self.interpreter.advance_stacks_chain_tip(count)
     }
 
-    fn parse_and_set_tx_sender(&mut self, command: &str) -> String {
+    fn parse_and_set_tx_sender(&mut self, command: &str) -> Result<String, String> {
         let args: Vec<_> = command.split(' ').filter(|&s| !s.is_empty()).collect();
 
         if args.len() != 2 {
-            return format!("{}", "Usage: ::set_tx_sender <address>".red());
+            return Err(format!("{}", "Usage: ::set_tx_sender <address>".red()));
         }
 
         let tx_sender = args[1];
@@ -1441,9 +1462,9 @@ impl Session {
         match PrincipalData::parse_standard_principal(args[1]) {
             Ok(address) => {
                 self.interpreter.set_tx_sender(address);
-                format!("tx-sender switched to {tx_sender}")
+                Ok(format!("tx-sender switched to {tx_sender}"))
             }
-            _ => format!("{}", "Unable to parse the address".red()),
+            _ => Err(format!("{}", "Unable to parse the address".red())),
         }
     }
 
@@ -1536,16 +1557,20 @@ impl Session {
     }
 
     pub fn set_epoch(&mut self, cmd: &str) -> String {
+        self.set_epoch_result(cmd).unwrap_or_else(|error| error)
+    }
+
+    fn set_epoch_result(&mut self, cmd: &str) -> Result<String, String> {
         let epoch = match cmd.split_once(' ').and_then(|(_, epoch)| super::epoch_from_str(epoch)) {
             Some(epoch) => epoch,
             None => {
-                return "Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4 | 4.0"
+                return Err("Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4 | 4.0"
                     .red()
-                    .to_string()
+                    .to_string())
             }
         };
         self.update_epoch(epoch);
-        format!("Epoch updated to: {epoch}").green().to_string()
+        Ok(format!("Epoch updated to: {epoch}").green().to_string())
     }
 
     pub fn update_epoch(&mut self, epoch: StacksEpochId) {
@@ -1575,8 +1600,12 @@ impl Session {
     }
 
     pub fn encode(&mut self, cmd: &str) -> String {
+        self.encode_result(cmd).unwrap_or_else(|error| error)
+    }
+
+    fn encode_result(&mut self, cmd: &str) -> Result<String, String> {
         let Some((_, snippet)) = cmd.split_once(' ') else {
-            return "Usage: ::encode <expr>".red().to_string();
+            return Err("Usage: ::encode <expr>".red().to_string());
         };
 
         // `::encode` serializes what the expression evaluates to, so it has to
@@ -1595,19 +1624,19 @@ impl Session {
                         if let Some(value) = contract_result.result {
                             value
                         } else {
-                            return "No value".to_string();
+                            return Ok("No value".to_string());
                         }
                     }
                     EvaluationResult::Snippet(snippet_result) => snippet_result.result,
                 };
                 if let Err(e) = value.consensus_serialize(&mut tx_bytes) {
-                    return format!("{e}").red().to_string();
+                    return Err(format!("{e}").red().to_string());
                 };
                 let mut s = String::with_capacity(2 * tx_bytes.len());
                 for byte in tx_bytes {
                     write!(s, "{byte:02x}").unwrap();
                 }
-                s.green().to_string()
+                Ok(s.green().to_string())
             }
             Err(diagnostics) => {
                 let lines: Vec<String> = snippet.split('\n').map(String::from).collect();
@@ -1616,35 +1645,41 @@ impl Session {
                     .flat_map(|d| output_diagnostic(&d, "encode", &lines))
                     .collect();
                 output.push("encoding failed".into());
-                output.join("\n")
+                Err(output.join("\n"))
             }
         }
     }
 
     pub fn decode(&mut self, cmd: &str) -> String {
+        self.decode_result(cmd).unwrap_or_else(|error| error)
+    }
+
+    fn decode_result(&self, cmd: &str) -> Result<String, String> {
         let Some((_, byte_string)) = cmd.split_once(' ') else {
-            return "Usage: ::decode <hex-bytes>".red().to_string();
+            return Err("Usage: ::decode <hex-bytes>".red().to_string());
         };
         let tx_bytes = match decode_hex(byte_string) {
             Ok(tx_bytes) => tx_bytes,
-            Err(e) => return format!("Parsing error: {e}").red().to_string(),
+            Err(e) => return Err(format!("Parsing error: {e}").red().to_string()),
         };
 
         let value = match Value::consensus_deserialize(&mut &tx_bytes[..]) {
             Ok(value) => value,
-            Err(e) => return format!("{e}").red().to_string(),
+            Err(e) => return Err(format!("{e}").red().to_string()),
         };
 
-        format!("{}", value_to_string(&value).green())
+        Ok(format!("{}", value_to_string(&value).green()))
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    pub fn get_costs(&mut self, output: &mut Vec<String>, cmd: &str) {
+    pub fn get_costs(&mut self, output: &mut Vec<String>, cmd: &str) -> Result<(), Vec<String>> {
         let Some((_, expr)) = cmd.split_once(' ') else {
-            return output.push("Usage: ::get_costs <expr>".red().to_string());
+            return Err(vec!["Usage: ::get_costs <expr>".red().to_string()]);
         };
 
-        let _ = self.run_snippet(output, true, expr);
+        self.run_snippet(output, true, expr)
+            .map(|_| ())
+            .map_err(|_| std::mem::take(output))
     }
 
     pub fn get_accounts(&self) -> Option<String> {
@@ -1739,26 +1774,26 @@ impl Session {
         )
     }
 
-    fn mint_stx(&mut self, command: &str) -> String {
+    fn mint_stx(&mut self, command: &str) -> Result<String, String> {
         let args: Vec<_> = command.split(' ').collect();
 
         if args.len() != 3 {
-            return "Usage: ::mint_stx <recipient address> <amount>"
+            return Err("Usage: ::mint_stx <recipient address> <amount>"
                 .red()
-                .to_string();
+                .to_string());
         }
 
         let Ok(recipient) = PrincipalData::parse(args[1]) else {
-            return "Unable to parse the address".red().to_string();
+            return Err("Unable to parse the address".red().to_string());
         };
 
         let Ok(amount) = args[2].parse::<u64>() else {
-            return "Unable to parse the balance".red().to_string();
+            return Err("Unable to parse the balance".red().to_string());
         };
 
         match self.interpreter.mint_stx_balance(recipient, amount) {
-            Ok(msg) => msg.green().to_string(),
-            Err(err) => err.red().to_string(),
+            Ok(msg) => Ok(msg.green().to_string()),
+            Err(err) => Err(err.red().to_string()),
         }
     }
 
@@ -1816,38 +1851,40 @@ impl Session {
         Ok(asset)
     }
 
-    fn mint_ft(&mut self, command: &str) -> String {
+    fn mint_ft(&mut self, command: &str) -> Result<String, String> {
         let args: Vec<_> = command.split(' ').collect();
 
         if args.len() != 4 {
-            return "Usage: ::mint_ft <asset identifier> <recipient address> <amount>"
-                .red()
-                .to_string();
+            return Err(
+                "Usage: ::mint_ft <asset identifier> <recipient address> <amount>"
+                    .red()
+                    .to_string(),
+            );
         }
 
         let asset_identifier = match self.resolve_asset_identifier(&self.get_tx_sender(), args[1]) {
             Ok(asset_identifier) => asset_identifier,
             Err(err) => {
-                return format!("Unable to parse the asset identifier: {err:?}")
+                return Err(format!("Unable to parse the asset identifier: {err:?}")
                     .red()
-                    .to_string()
+                    .to_string())
             }
         };
 
         let Ok(recipient) = PrincipalData::parse(args[2]) else {
-            return "Unable to parse the recipient address".red().to_string();
+            return Err("Unable to parse the recipient address".red().to_string());
         };
 
         let Ok(amount) = args[3].parse::<u128>() else {
-            return "Unable to parse the amount".red().to_string();
+            return Err("Unable to parse the amount".red().to_string());
         };
 
         match self
             .interpreter
             .mint_ft_balance(&asset_identifier, &recipient, amount)
         {
-            Ok(msg) => msg.green().to_string(),
-            Err(err) => err.red().to_string(),
+            Ok(msg) => Ok(msg.green().to_string()),
+            Err(err) => Err(err.red().to_string()),
         }
     }
 
@@ -1873,7 +1910,7 @@ impl Session {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn display_doc(&self, command: &str) -> String {
+    fn display_doc(&self, command: &str) -> Result<String, String> {
         let keyword = {
             let mut s = command.to_string();
             s = s.replace("::describe", "");
@@ -1882,11 +1919,11 @@ impl Session {
         };
 
         match self.lookup_functions_or_keywords_docs(&keyword) {
-            Some(doc) => format!("{}", doc.yellow()),
-            None => format!(
+            Some(doc) => Ok(format!("{}", doc.yellow())),
+            None => Err(format!(
                 "{}",
                 "It looks like there aren't matches for your search".red()
-            ),
+            )),
         }
     }
 
