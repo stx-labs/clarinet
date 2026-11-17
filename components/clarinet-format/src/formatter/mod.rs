@@ -192,7 +192,6 @@ impl IntoIterator for ParseFailure {
     type Item = Diagnostic;
     type IntoIter = iter::Chain<iter::Once<Diagnostic>, vec::IntoIter<Diagnostic>>;
 
-    /// The error, then its notes, in the order the parser reported them
     fn into_iter(self) -> Self::IntoIter {
         iter::once(self.error).chain(self.notes)
     }
