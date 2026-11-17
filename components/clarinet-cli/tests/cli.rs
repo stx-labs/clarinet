@@ -363,11 +363,10 @@ fn test_formatter_continues_after_failed_files() {
     let output = run_format(&["--check"]);
     assert_eq!(output.status.code(), Some(1));
     let stderr = String::from_utf8_lossy(&output.stderr);
-    assert!(
-        stderr.contains("broken.clar:2:11: expected closing ')'"),
-        "{stderr}"
-    );
-    assert!(stderr.contains("deleted.clar: "), "{stderr}");
+    assert!(stderr.contains("expected closing ')'"), "{stderr}");
+    assert!(stderr.contains("broken.clar:2:11"), "{stderr}");
+    assert!(stderr.contains("unable to read file: '"), "{stderr}");
+    assert!(stderr.contains("deleted.clar': "), "{stderr}");
     assert!(
         stderr.contains("2 files could not be read or parsed"),
         "{stderr}"

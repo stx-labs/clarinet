@@ -218,20 +218,18 @@ impl FormatterInputSource {
         }
     }
 
-    /// Read or parse failures include the source name and, when available, the error location.
+    /// Read or parse failures are rendered as `clarinet check` renders them.
     fn read_and_format(&self, formatter: &ClarityFormatter) -> Result<FormattedSource, String> {
         let name = self.file_path().unwrap_or("<stdin>");
-        let original = self.get_input().map_err(|e| format!("{name}: {e}"))?;
-        let formatted = formatter.format(&original, self.epoch()).map_err(|error| {
-            let message = error.message;
-            match error.spans.first() {
-                Some(span) => format!(
-                    "{name}:{}:{}: {message}",
-                    span.start_line, span.start_column
-                ),
-                None => format!("{name}: {message}"),
-            }
-        })?;
+        let original = self
+            .get_input()
+            .map_err(|e| format_err!(format!("unable to read file: '{name}': {e}")))?;
+        let formatted = formatter
+            .format(&original, self.epoch())
+            .map_err(|diagnostic| {
+                let lines: Vec<String> = original.lines().map(String::from).collect();
+                output_diagnostic(&LintDiagnostic::from(diagnostic), name, &lines).join("\n")
+            })?;
         Ok(FormattedSource {
             changed: original != formatted,
             formatted,
@@ -1546,7 +1544,7 @@ pub fn main() {
                     match source.read_and_format(&formatter) {
                         Ok(result) => result,
                         Err(error) => {
-                            eprintln!("{} {error}", red!("✗"));
+                            eprintln!("{error}");
                             failed_files += 1;
                             continue;
                         }
