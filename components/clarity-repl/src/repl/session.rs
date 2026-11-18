@@ -529,49 +529,43 @@ impl Session {
             };
 
         if let Some(cost) = cost {
-            let headers = [
-                "".to_string(),
-                "Consumed".to_string(),
-                "Limit".to_string(),
-                "Percentage".to_string(),
-            ];
-
-            let mut table = comfy_table::Table::new();
-            table.add_row(headers);
-            table.add_row(vec![
-                "Runtime",
-                &cost.total.runtime.to_string(),
-                &cost.limit.runtime.to_string(),
-                &(Self::get_costs_percentage(&cost.total.runtime, &cost.limit.runtime)),
-            ]);
-            table.add_row(vec![
-                "Read count",
-                &cost.total.read_count.to_string(),
-                &cost.limit.read_count.to_string(),
-                &Self::get_costs_percentage(&cost.total.read_count, &cost.limit.read_count),
-            ]);
-            table.add_row(vec![
-                "Read length (bytes)",
-                &cost.total.read_length.to_string(),
-                &cost.limit.read_length.to_string(),
-                &Self::get_costs_percentage(&cost.total.read_length, &cost.limit.read_length),
-            ]);
-            table.add_row(vec![
-                "Write count",
-                &cost.total.write_count.to_string(),
-                &cost.limit.write_count.to_string(),
-                &Self::get_costs_percentage(&cost.total.write_count, &cost.limit.write_count),
-            ]);
-            table.add_row(vec![
-                "Write length (bytes)",
-                &cost.total.write_length.to_string(),
-                &cost.limit.write_length.to_string(),
-                &(Self::get_costs_percentage(&cost.total.write_length, &cost.limit.write_length)),
-            ]);
-            output.push(table.to_string());
+            output.push(Self::cost_table(&cost));
         }
         output.append(&mut result);
         execution_result
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn cost_table(cost: &CostSynthesis) -> String {
+        let mut table = comfy_table::Table::new();
+        table.add_row(["", "Consumed", "Limit", "Percentage"]);
+        for (name, consumed, limit) in [
+            ("Runtime", cost.total.runtime, cost.limit.runtime),
+            ("Read count", cost.total.read_count, cost.limit.read_count),
+            (
+                "Read length (bytes)",
+                cost.total.read_length,
+                cost.limit.read_length,
+            ),
+            (
+                "Write count",
+                cost.total.write_count,
+                cost.limit.write_count,
+            ),
+            (
+                "Write length (bytes)",
+                cost.total.write_length,
+                cost.limit.write_length,
+            ),
+        ] {
+            table.add_row([
+                name.to_string(),
+                consumed.to_string(),
+                limit.to_string(),
+                Self::get_costs_percentage(&consumed, &limit),
+            ]);
+        }
+        table.to_string()
     }
 
     #[cfg(not(target_arch = "wasm32"))]

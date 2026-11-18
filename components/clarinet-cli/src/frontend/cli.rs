@@ -498,7 +498,12 @@ struct ApplyDeployment {
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct Console {
     /// Evaluate an expression and exit (repeatable)
-    #[clap(long = "eval", short = 'e', value_name = "expr")]
+    #[clap(
+        long = "eval",
+        short = 'e',
+        value_name = "expr",
+        allow_negative_numbers = true
+    )]
     pub eval: Vec<String>,
 
     /// Path to Clarinet.toml
@@ -907,7 +912,7 @@ pub fn main() {
                         Err(format!("{}: a flag `--devnet`, `--testnet`, `--mainnet` or `--deployment-plan-path=path/to/yaml` should be provided.", yellow!("Command usage")))
                     }
                     (Some(network), None) => {
-                        load_deployment_if_exists(&manifest, network, cmd.use_on_disk_deployment_plan, cmd.use_computed_deployment_plan).and_then(|opt| match opt {
+                        load_deployment_if_exists(&manifest, network, PlanUpdate::from_flags(cmd.use_on_disk_deployment_plan, cmd.use_computed_deployment_plan)).and_then(|opt| match opt {
                             Some(deployment) => {
                                 println!(
                                     "{} using existing deployments/default.{}-plan.yaml",
@@ -1155,47 +1160,56 @@ pub fn main() {
             }
         },
         Command::Console(cmd) => {
+            let interactive = cmd.eval.is_empty();
             let mut expressions = cmd.eval.iter();
             // Loop to handle `::reload` command
             loop {
-                let mut manifest = load_manifest_or_warn(cmd.manifest_path.clone());
-                if !cmd.eval.is_empty() {
-                    if let Some(manifest) = &mut manifest {
-                        manifest.repl_settings.show_timings = false;
-                    }
-                }
+                let manifest = load_manifest_or_warn(cmd.manifest_path.clone());
 
                 let mut terminal = match manifest {
                     Some(ref manifest) => {
                         let ((deployment, _, artifacts), _) = load_deployment_and_artifacts_or_exit(
                             manifest,
                             &cmd.deployment_plan_path,
-                            cmd.use_on_disk_deployment_plan,
-                            cmd.use_computed_deployment_plan
-                                || (!cmd.eval.is_empty() && !cmd.use_on_disk_deployment_plan),
+                            if !interactive
+                                && !cmd.use_on_disk_deployment_plan
+                                && !cmd.use_computed_deployment_plan
+                            {
+                                PlanUpdate::InMemory
+                            } else {
+                                PlanUpdate::from_flags(
+                                    cmd.use_on_disk_deployment_plan,
+                                    cmd.use_computed_deployment_plan,
+                                )
+                            },
                             false,
                             Environment::Simnet,
                         );
 
-                        if !artifacts.success || !cmd.eval.is_empty() {
+                        if !artifacts.success || !interactive {
                             let diags_digest = DiagnosticsDigest::new(
                                 &artifacts.diags,
                                 &artifacts.lint_diags,
                                 &deployment,
                             );
                             if diags_digest.has_feedbacks() {
-                                if cmd.eval.is_empty() {
+                                if interactive {
                                     println!("{}", diags_digest.message);
                                 } else {
                                     eprintln!("{}", diags_digest.message);
                                 }
                             }
                             if diags_digest.errors > 0 {
-                                eprintln!(
+                                let message = format!(
                                     "{} {} detected",
                                     red!("x"),
                                     pluralize!(diags_digest.errors, "error")
                                 );
+                                if interactive {
+                                    println!("{message}");
+                                } else {
+                                    eprintln!("{message}");
+                                }
                             }
                             if !artifacts.success {
                                 std::process::exit(1);
@@ -1216,7 +1230,7 @@ pub fn main() {
                         Terminal::new(settings)
                     }
                 };
-                let reload = if cmd.eval.is_empty() {
+                let reload = if interactive {
                     terminal.start()
                 } else {
                     let mut reload = false;
@@ -1267,7 +1281,7 @@ pub fn main() {
                 }
             }
 
-            if cmd.eval.is_empty() && clarinetrc.enable_hints.unwrap_or(true) {
+            if interactive && clarinetrc.enable_hints.unwrap_or(true) {
                 display_contract_new_hint(None);
             }
         }
@@ -1419,8 +1433,10 @@ pub fn main() {
                     load_deployment_and_artifacts_or_exit(
                         &manifest,
                         &cmd.deployment_plan_path,
-                        cmd.use_on_disk_deployment_plan,
-                        cmd.use_computed_deployment_plan,
+                        PlanUpdate::from_flags(
+                            cmd.use_on_disk_deployment_plan,
+                            cmd.use_computed_deployment_plan,
+                        ),
                         true,
                         environment,
                     );
@@ -1787,11 +1803,30 @@ fn load_manifest_or_warn(path: Option<String>) -> Option<ProjectManifest> {
         .ok()
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PlanUpdate {
+    Prompt,
+    OnDisk,
+    Overwrite,
+    InMemory,
+}
+
+impl PlanUpdate {
+    fn from_flags(on_disk: bool, computed: bool) -> Self {
+        if on_disk {
+            Self::OnDisk
+        } else if computed {
+            Self::Overwrite
+        } else {
+            Self::Prompt
+        }
+    }
+}
+
 pub fn load_deployment_and_artifacts_or_exit(
     manifest: &ProjectManifest,
     deployment_plan_path: &Option<String>,
-    force_on_disk: bool,
-    force_computed: bool,
+    plan_update: PlanUpdate,
     enable_analysis: bool,
     environment: Environment,
 ) -> (
@@ -1806,58 +1841,53 @@ pub fn load_deployment_and_artifacts_or_exit(
     let mut found_env_simnet = false;
     let result = match deployment_plan_path {
         None => {
-            load_deployment_if_exists(
-                manifest,
-                &StacksNetwork::Simnet,
-                force_on_disk,
-                force_computed,
-            )
-            .map_err(|e| format!("loading {default_deployment_file} failed with error: {e}"))
-            .and_then(|opt| match opt {
-                Some(mut deployment) => {
-                    eprintln!("{} using {default_deployment_file}", yellow!("note:"));
-                    if environment == Environment::OnChain {
-                        found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
-                    }
-                    let artifacts = setup_session_with_deployment(
-                        manifest,
-                        &mut deployment,
-                        None,
-                        enable_analysis,
-                        environment,
-                    );
-                    Ok((deployment, None, artifacts))
-                }
-                None => {
-                    let (mut deployment, ast_artifacts, gen_found_env_simnet) =
-                        generate_default_deployment(
-                            manifest,
-                            &StacksNetwork::Simnet,
-                            false,
-                            environment,
-                        )?;
-                    found_env_simnet |= gen_found_env_simnet;
-                    if ast_artifacts.success {
-                        let mut artifacts = setup_session_with_deployment(
+            load_deployment_if_exists(manifest, &StacksNetwork::Simnet, plan_update)
+                .map_err(|e| format!("loading {default_deployment_file} failed with error: {e}"))
+                .and_then(|opt| match opt {
+                    Some(mut deployment) => {
+                        eprintln!("{} using {default_deployment_file}", yellow!("note:"));
+                        if environment == Environment::OnChain {
+                            found_env_simnet |= deployment.remove_env_simnet().unwrap_or(false);
+                        }
+                        let artifacts = setup_session_with_deployment(
                             manifest,
                             &mut deployment,
-                            Some(&ast_artifacts.asts),
+                            None,
                             enable_analysis,
                             environment,
                         );
-                        for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
-                            // Merge parser's diags with analysis' diags.
-                            if let Some(ref mut diags) = artifacts.diags.remove(&contract_id) {
-                                parser_diags.append(diags);
-                            }
-                            artifacts.diags.insert(contract_id, parser_diags);
-                        }
                         Ok((deployment, None, artifacts))
-                    } else {
-                        Ok((deployment, None, ast_artifacts))
                     }
-                }
-            })
+                    None => {
+                        let (mut deployment, ast_artifacts, gen_found_env_simnet) =
+                            generate_default_deployment(
+                                manifest,
+                                &StacksNetwork::Simnet,
+                                false,
+                                environment,
+                            )?;
+                        found_env_simnet |= gen_found_env_simnet;
+                        if ast_artifacts.success {
+                            let mut artifacts = setup_session_with_deployment(
+                                manifest,
+                                &mut deployment,
+                                Some(&ast_artifacts.asts),
+                                enable_analysis,
+                                environment,
+                            );
+                            for (contract_id, mut parser_diags) in ast_artifacts.diags.into_iter() {
+                                // Merge parser's diags with analysis' diags.
+                                if let Some(ref mut diags) = artifacts.diags.remove(&contract_id) {
+                                    parser_diags.append(diags);
+                                }
+                                artifacts.diags.insert(contract_id, parser_diags);
+                            }
+                            Ok((deployment, None, artifacts))
+                        } else {
+                            Ok((deployment, None, ast_artifacts))
+                        }
+                    }
+                })
         }
         Some(path) => {
             let project_root = &manifest.root_dir;
@@ -1941,8 +1971,7 @@ fn should_existing_plan_be_replaced(
 fn load_deployment_if_exists(
     manifest: &ProjectManifest,
     network: &StacksNetwork,
-    force_on_disk: bool,
-    force_computed: bool,
+    plan_update: PlanUpdate,
 ) -> Result<Option<DeploymentSpecification>, String> {
     let project_root = &manifest.root_dir;
     let default_deployment_location = project_root.join(get_default_deployment_path(network));
@@ -1950,7 +1979,17 @@ fn load_deployment_if_exists(
         return Ok(None);
     }
 
-    if !force_on_disk {
+    if plan_update == PlanUpdate::InMemory {
+        return generate_default_deployment(
+            manifest,
+            network,
+            true,
+            network.deployment_environment(),
+        )
+        .map(|(deployment, _, _)| Some(deployment));
+    }
+
+    if plan_update != PlanUpdate::OnDisk {
         match generate_default_deployment(manifest, network, true, network.deployment_environment())
         {
             Ok((deployment, _, _)) => {
@@ -1967,7 +2006,7 @@ fn load_deployment_if_exists(
                     return load_deployment(project_root, &default_deployment_location).map(Some);
                 }
 
-                if !force_computed {
+                if plan_update == PlanUpdate::Prompt {
                     println!("{}", blue!("A new deployment plan was computed and differs from the default deployment plan currently saved on disk:"));
 
                     let diffs = TextDiff::from_lines(
@@ -2002,7 +2041,6 @@ fn load_deployment_if_exists(
                     Ok(Some(deployment))
                 }
             }
-            Err(message) if force_computed => Err(message),
             Err(message) => {
                 eprintln!(
                     "{} unable to compute an updated plan\n{}",
@@ -2420,8 +2458,10 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         None => load_deployment_if_exists(
             &manifest,
             &StacksNetwork::Devnet,
-            cmd.use_on_disk_deployment_plan,
-            cmd.use_computed_deployment_plan,
+            PlanUpdate::from_flags(
+                cmd.use_on_disk_deployment_plan,
+                cmd.use_computed_deployment_plan,
+            ),
         )
         .and_then(|opt| match opt {
             Some(deployment) => {

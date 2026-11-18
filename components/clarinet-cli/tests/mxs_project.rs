@@ -1,5 +1,7 @@
 use clarinet_files::ProjectManifest;
-use clarinet_lib::frontend::cli::{load_deployment_and_artifacts_or_exit, load_manifest_or_exit};
+use clarinet_lib::frontend::cli::{
+    load_deployment_and_artifacts_or_exit, load_manifest_or_exit, PlanUpdate,
+};
 use clarity_repl::utils::Environment;
 
 fn load_manifest() -> ProjectManifest {
@@ -18,8 +20,7 @@ fn test_session_with_testnet_accounts() {
     let ((_deployment, _location, artifacts), _) = load_deployment_and_artifacts_or_exit(
         &manifest,
         &None,
-        false,
-        true,
+        PlanUpdate::Overwrite,
         false,
         Environment::Simnet,
     );
@@ -39,8 +40,7 @@ fn test_session_with_mainnet_accounts() {
     let ((_deployment, _location, artifacts), _) = load_deployment_and_artifacts_or_exit(
         &manifest,
         &None,
-        false,
-        true,
+        PlanUpdate::Overwrite,
         false,
         Environment::Simnet,
     );

@@ -74,24 +74,23 @@ impl Terminal {
 
     pub fn eval(&mut self, input: &str) -> Result<(), String> {
         self.executed.push(input.to_string());
-        self.session.interpreter.repl_settings.show_timings = false;
         let result = if let Some(filename) = input.strip_prefix("::read ") {
             std::fs::read_to_string(filename)
                 .map_err(|error| format!("unable to read {filename}: {error}"))
-                .and_then(|snippet| self.eval_snippet(&snippet))
+                .and_then(|snippet| self.eval_snippet(&snippet, self.session.show_costs))
         } else if input.starts_with("::debug") {
             Err("::debug requires an interactive console".into())
-        } else if input.starts_with("::trace")
-            || input.starts_with("::perf")
-            || input.starts_with("::get_costs")
-        {
+        } else if input.starts_with("::get_costs") {
+            match input.split_once(' ') {
+                Some((_, snippet)) => self.eval_snippet(snippet, true),
+                None => Err("Usage: ::get_costs <expr>".into()),
+            }
+        } else if input.starts_with("::trace") || input.starts_with("::perf") {
             let mut output = vec![];
             let result = if input.starts_with("::trace") {
                 self.session.trace(&mut output, input)
-            } else if input.starts_with("::perf") {
-                self.session.perf(&mut output, input)
             } else {
-                self.session.get_costs(&mut output, input)
+                self.session.perf(&mut output, input)
             };
             result
                 .map(|_| output.join("\n"))
@@ -99,7 +98,7 @@ impl Terminal {
         } else if input.starts_with("::") {
             self.session.handle_command_result(input)
         } else {
-            self.eval_snippet(input)
+            self.eval_snippet(input, self.session.show_costs)
         };
         match result {
             Ok(output) => {
@@ -113,16 +112,19 @@ impl Terminal {
         }
     }
 
-    fn eval_snippet(&mut self, snippet: &str) -> Result<String, String> {
+    fn eval_snippet(&mut self, snippet: &str, cost_track: bool) -> Result<String, String> {
         let snippet = self.session.remap_user_snippet(snippet.to_string());
         let lines = snippet.lines().map(String::from).collect::<Vec<_>>();
-        let result = self.session.eval(snippet, false).map_err(|diagnostics| {
-            diagnostics
-                .iter()
-                .flat_map(|diagnostic| output_diagnostic(diagnostic, "<stdin>", &lines))
-                .collect::<Vec<_>>()
-                .join("\n")
-        })?;
+        let result = self
+            .session
+            .eval(snippet, cost_track)
+            .map_err(|diagnostics| {
+                diagnostics
+                    .iter()
+                    .flat_map(|diagnostic| output_diagnostic(diagnostic, "<stdin>", &lines))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
         for diagnostic in result
             .diagnostics
             .iter()
@@ -134,12 +136,15 @@ impl Terminal {
                 eprintln!("{line}");
             }
         }
+        if let Some(cost) = &result.cost {
+            println!("{}", Session::cost_table(cost));
+        }
         Ok(match result.into_inner().result {
             EvaluationResult::Contract(contract) => contract
                 .result
                 .as_ref()
                 .map(value_to_string)
-                .unwrap_or_default(),
+                .unwrap_or_else(|| "No value".into()),
             EvaluationResult::Snippet(snippet) => value_to_string(&snippet.result),
         })
     }

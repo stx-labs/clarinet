@@ -132,6 +132,13 @@ fn eval_is_quiet_and_stops_on_the_first_error() {
     let temp_dir = tempfile::tempdir().unwrap();
     for (args, stdout, success, error) in [
         (vec!["-e", "(+ 1 1)"], "2\n", true, ""),
+        (vec!["-e", "-1"], "-1\n", true, ""),
+        (
+            vec!["-e", "(define-read-only (f) u1)"],
+            "No value\n",
+            true,
+            "",
+        ),
         (
             vec!["-e", "(+ 1 1)", "-e", "::reload", "-e", "(+ 2 2)"],
             "2\n4\n",
@@ -243,6 +250,8 @@ fn eval_uses_one_project_session_and_routes_startup_diagnostics() {
         .unwrap()
         .status
         .success());
+    let plan = project.join("deployments/default.simnet-plan.yaml");
+    let original_plan = std::fs::read(&plan).unwrap();
     assert!(Command::new(clarinet)
         .args(["contract", "new", "other"])
         .current_dir(&project)
@@ -263,6 +272,23 @@ fn eval_uses_one_project_session_and_routes_startup_diagnostics() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("other.clar"), "{stderr}");
     assert!(stderr.contains("error:"), "{stderr}");
+    let output = Command::new(clarinet)
+        .args([
+            "console",
+            "-c",
+            "-e",
+            "(contract-call? 'ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5.counter get-count)",
+        ])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(output.stdout, b"u0\n");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("unable to compute an updated plan"));
     std::fs::write(&other, other_source).unwrap();
 
     let output = Command::new(clarinet)
@@ -276,6 +302,15 @@ fn eval_uses_one_project_session_and_routes_startup_diagnostics() {
         String::from_utf8_lossy(&output.stderr)
     );
     assert_eq!(output.stdout, b"2\n");
+    assert_eq!(std::fs::read(&plan).unwrap(), original_plan);
+
+    let output = Command::new(clarinet)
+        .args(["console", "-c", "-e", "(+ 1 1)"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    assert_ne!(std::fs::read(&plan).unwrap(), original_plan);
 
     // Startup errors must prevent evaluation.
     std::fs::write(&contract, "(define-read-only (get-count) missing)").unwrap();
@@ -287,6 +322,15 @@ fn eval_uses_one_project_session_and_routes_startup_diagnostics() {
     assert!(!output.status.success());
     assert!(output.stdout.is_empty());
     assert!(String::from_utf8_lossy(&output.stderr).contains("error:"));
+
+    let output = Command::new(clarinet)
+        .arg("console")
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stdout).contains("error detected"));
+    assert!(!String::from_utf8_lossy(&output.stderr).contains("error detected"));
 }
 
 #[test]
@@ -315,4 +359,49 @@ fn eval_command_errors_stop_evaluation() {
         assert!(output.stdout.is_empty(), "{command}");
         assert!(!output.stderr.is_empty(), "{command}");
     }
+}
+
+#[test]
+fn eval_routes_cost_warnings_and_honors_toggles() {
+    let temp_dir = tempfile::tempdir().unwrap();
+    let clarinet = env!("CARGO_BIN_EXE_clarinet");
+    let output = Command::new(clarinet)
+        .args(["console", "-e", "::get_costs ;; #[unknown]\n(+ 1 1)"])
+        .current_dir(&temp_dir)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("Runtime"), "{stdout}");
+    assert!(stdout.ends_with("2\n"), "{stdout}");
+    assert!(!stdout.contains("warning:"), "{stdout}");
+    assert!(String::from_utf8_lossy(&output.stderr).contains("warning: unrecognized annotation"));
+
+    let output = Command::new(clarinet)
+        .args([
+            "console",
+            "-e",
+            "::toggle_costs",
+            "-e",
+            "::toggle_timings",
+            "-e",
+            "(+ 1 1)",
+            "-e",
+            "::toggle_costs",
+            "-e",
+            "::toggle_timings",
+            "-e",
+            "(+ 2 2)",
+        ])
+        .current_dir(&temp_dir)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.matches("Runtime").count(), 1, "{stdout}");
+    assert_eq!(stdout.matches("execution time:").count(), 1, "{stdout}");
+    assert!(
+        stdout.ends_with("Always show costs: false\nAlways show timings: false\n4\n"),
+        "{stdout}"
+    );
 }
