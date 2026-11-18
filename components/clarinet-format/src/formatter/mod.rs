@@ -802,34 +802,30 @@ impl<'a> Aggregator<'a> {
         let [_, bindings, body @ ..] = exprs else {
             return self.preserve_expr(expr, indent);
         };
-        let Some(args) = bindings.match_list() else {
+        let Some(bindings) = bindings.match_list() else {
             return self.preserve_expr(expr, indent);
         };
         let nested = indent.indented(&self.indentation_str);
-        let mut parts: Vec<Doc> = vec![Doc::text("(let (")];
-
-        if args.len() == 1 {
-            parts.push(Doc::verbatim(
-                self.format_source_exprs(slice::from_ref(&args[0]), &nested),
-            ));
-            parts.push(Doc::text(")"));
+        let bindings = if let [binding] = bindings {
+            let binding = self.format_source_exprs(slice::from_ref(binding), &nested);
+            Doc::verbatim(format!("({binding})"))
         } else {
-            let double_indent = nested.indented(&self.indentation_str);
-            let binding_parts = self.lines_doc(args, &double_indent, false);
-            // Double-indent for bindings, close paren at single-indent
-            parts.push(Doc::indent(Doc::concat(vec![
-                Doc::indent(Doc::concat(binding_parts)),
-                Doc::Hardline,
-                Doc::text(")"),
-            ])));
-        }
-
-        parts.push(self.body_doc(body, &nested));
-        parts.push(Doc::Hardline);
-        parts.push(Doc::text(")"));
-
-        let doc = Doc::concat(parts);
+            self.multiline_list_doc(bindings, &nested)
+        };
+        let doc = Doc::concat(vec![
+            Doc::text("(let "),
+            bindings,
+            self.body_doc(body, &nested),
+            Doc::Hardline,
+            Doc::text(")"),
+        ]);
         self.render_doc(&doc, indent)
+    }
+
+    fn multiline_list_doc(&mut self, items: &'a [PreSymbolicExpression], indent: &Indent) -> Doc {
+        let nested = indent.indented(&self.indentation_str);
+        let lines = self.lines_doc(items, &nested, false);
+        Doc::indent(block(Doc::text("("), lines, ")"))
     }
 
     /// Body expressions one per line at `indent`, keeping at most one blank
@@ -1018,30 +1014,20 @@ impl<'a> Aggregator<'a> {
         let nested = indent.indented(&self.indentation_str);
         let owner = self.format_source_exprs(slice::from_ref(owner), indent);
 
-        let mut parts: Vec<Doc> = vec![Doc::text("(restrict-assets? "), Doc::verbatim(owner)];
-
-        // allowances
-        if allowances.len() == 1 {
-            parts.push(Doc::text(" "));
-            parts.push(Doc::verbatim(
-                self.format_source_exprs(slice::from_ref(allowances_list), indent),
-            ));
+        let allowances = if allowances.len() == 1 {
+            Doc::verbatim(self.format_source_exprs(slice::from_ref(allowances_list), indent))
         } else {
-            let double_indent = nested.indented(&self.indentation_str);
-            let allowance_parts = self.lines_doc(allowances, &double_indent, false);
-            parts.push(Doc::text(" ("));
-            parts.push(Doc::indent(Doc::concat(vec![
-                Doc::indent(Doc::concat(allowance_parts)),
-                Doc::Hardline,
-                Doc::text(")"),
-            ])));
-        }
-
-        parts.push(self.body_doc(body, &nested));
-        parts.push(Doc::Hardline);
-        parts.push(Doc::text(")"));
-
-        let doc = Doc::concat(parts);
+            self.multiline_list_doc(allowances, &nested)
+        };
+        let doc = Doc::concat(vec![
+            Doc::text("(restrict-assets? "),
+            Doc::verbatim(owner),
+            Doc::text(" "),
+            allowances,
+            self.body_doc(body, &nested),
+            Doc::Hardline,
+            Doc::text(")"),
+        ]);
         self.render_doc(&doc, indent)
     }
 
