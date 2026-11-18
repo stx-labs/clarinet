@@ -829,7 +829,9 @@ impl SDK {
         let deployment_file = deployment_plan.to_file_content(project_root)?;
 
         if let Some(existing_file) = existing_file {
-            if existing_file.as_bytes() == deployment_file {
+            if existing_file.as_bytes() == deployment_file
+                || deployment_plan.matches_file_content(existing_file, project_root)
+            {
                 return Ok(());
             }
         }
