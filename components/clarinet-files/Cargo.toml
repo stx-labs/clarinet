@@ -6,7 +6,6 @@ description = "Clarinet manifests files helpers"
 license = "GPL-3.0"
 
 [dependencies]
-libsecp256k1 = { workspace = true }
 rpassword = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true, optional = true }
