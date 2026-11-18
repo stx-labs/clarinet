@@ -1414,13 +1414,13 @@ impl<'a> Aggregator<'a> {
                             literal.push('"');
                             literal
                         }
-                        clarity::vm::types::CharType::UTF8(_) => {
+                        clarity::vm::types::CharType::UTF8(utf8_data) => {
                             // utf8 strings use the original source to preserve formatting
                             self.source_lines
                                 .as_ref()
                                 .map(|source_lines| source_lines.extract_expr_source(pse))
                                 .filter(|extracted| !extracted.is_empty())
-                                .unwrap_or_else(|| value.to_string())
+                                .unwrap_or_else(|| utf8_literal(&utf8_data.data))
                         }
                     }
                 }
@@ -1748,6 +1748,22 @@ fn push_spaces(acc: &mut String, count: u32) {
     for _ in 0..count {
         acc.push(' ');
     }
+}
+
+fn utf8_literal(codepoints: &[Vec<u8>]) -> String {
+    let mut literal = String::from("u\"");
+    for bytes in codepoints {
+        for ch in String::from_utf8_lossy(bytes).chars() {
+            // Clarity rejects the escaped apostrophe produced by escape_default.
+            if ch == '\'' {
+                literal.push(ch);
+            } else {
+                literal.extend(ch.escape_default());
+            }
+        }
+    }
+    literal.push('"');
+    literal
 }
 
 fn comment_piece(text: &str, pse: &PreSymbolicExpression) -> String {

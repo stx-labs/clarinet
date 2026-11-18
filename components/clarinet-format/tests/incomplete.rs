@@ -13,6 +13,7 @@ fn incomplete_special_forms_preserve_source() {
         "(restrict-assets? tx-sender)",
         "(let not-bindings u1)",
         "(restrict-assets? tx-sender u1 (ok true))",
+        r#"(restrict-assets? tx-sender u"\u{e9}")"#,
         "(ok (let))",
         "(some (match))",
         "(some (restrict-assets? tx-sender))",
