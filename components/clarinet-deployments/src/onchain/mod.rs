@@ -14,7 +14,6 @@ use clarity_repl::repl::boot::{
     remap_mainnet_boot_principals, SBTC_CONTRACTS_NAMES, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
 };
 use clarity_repl::repl::{Session, SessionSettings};
-use libsecp256k1::PublicKey;
 use reqwest::Url;
 use stacks_codec::strings::StacksString;
 use stacks_codec::transaction::{
@@ -23,9 +22,7 @@ use stacks_codec::transaction::{
     TransactionPostConditionMode, TransactionPublicKeyEncoding, TransactionSmartContract,
     TransactionSpendingCondition, TransactionVersion,
 };
-use stacks_common::address::{
-    AddressHashMode, C32_ADDRESS_VERSION_MAINNET_SINGLESIG, C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
-};
+use stacks_rpc_client::crypto::compute_stacks_address;
 use stacks_rpc_client::StacksRpc;
 
 mod bitcoin_deployment;
@@ -105,32 +102,16 @@ fn requirement_publish_source(
 
 fn get_btc_secret_key(account: &AccountConfig) -> bitcoincore_rpc::bitcoin::secp256k1::SecretKey {
     use bitcoincore_rpc::bitcoin::secp256k1::SecretKey;
-    let (secret_bytes, _) =
-        get_bip32_keys_from_mnemonic(&account.mnemonic, "", &account.derivation).unwrap();
-    SecretKey::from_slice(&secret_bytes).unwrap()
+    let keys = get_bip32_keys_from_mnemonic(&account.mnemonic, &account.derivation).unwrap();
+    SecretKey::from_slice(&keys.secret_key).unwrap()
 }
 
-fn get_keypair(account: &AccountConfig) -> (Secp256k1PrivateKey, PublicKey) {
-    let (secret_bytes, public_key) =
-        get_bip32_keys_from_mnemonic(&account.mnemonic, "", &account.derivation).unwrap();
-    let wrapped_secret_key = Secp256k1PrivateKey::from_slice(&secret_bytes).unwrap();
-    (wrapped_secret_key, public_key)
-}
-
-fn get_stacks_address(public_key: &PublicKey, network: &StacksNetwork) -> StacksAddress {
-    let wrapped_public_key =
-        Secp256k1PublicKey::from_slice(&public_key.serialize_compressed()).unwrap();
-
-    StacksAddress::from_public_keys(
-        match network {
-            StacksNetwork::Mainnet => C32_ADDRESS_VERSION_MAINNET_SINGLESIG,
-            _ => C32_ADDRESS_VERSION_TESTNET_SINGLESIG,
-        },
-        &AddressHashMode::SerializeP2PKH,
-        1,
-        &vec![wrapped_public_key],
+fn get_keypair(account: &AccountConfig) -> (Secp256k1PrivateKey, Secp256k1PublicKey) {
+    let keys = get_bip32_keys_from_mnemonic(&account.mnemonic, &account.derivation).unwrap();
+    (
+        Secp256k1PrivateKey::from_slice(&keys.secret_key).unwrap(),
+        Secp256k1PublicKey::from_slice(&keys.public_key).unwrap(),
     )
-    .unwrap()
 }
 
 fn anchor_mode(anchor_block_only: bool) -> TransactionAnchorMode {
@@ -150,7 +131,8 @@ fn sign_transaction_payload(
     network: &StacksNetwork,
 ) -> Result<StacksTransaction, String> {
     let (secret_key, public_key) = get_keypair(account);
-    let signer_addr = get_stacks_address(&public_key, network);
+    let signer_addr =
+        compute_stacks_address(&public_key, matches!(network, StacksNetwork::Mainnet));
 
     let spending_condition = TransactionSpendingCondition::Singlesig(SinglesigSpendingCondition {
         signer: signer_addr.bytes().clone(),

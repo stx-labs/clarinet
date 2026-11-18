@@ -71,11 +71,11 @@ fn test_irl_contracts() {
             // Apply formatting and compare
             let (settings, real_source) = settings_from_source(&src);
             let formatter = ClarityFormatter::new(settings);
-            let result = formatter.format_file(&real_source, None);
+            let result = formatter.format_file(&real_source, None).unwrap();
             pretty_assertions::assert_eq!(result, intended, "Mismatch in file: {file_name:?}");
 
             // Format the output again with the same settings
-            let reformatted = formatter.format_file(&result, None);
+            let reformatted = formatter.format_file(&result, None).unwrap();
 
             pretty_assertions::assert_eq!(
                 reformatted,

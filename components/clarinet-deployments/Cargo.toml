@@ -7,7 +7,7 @@ edition = "2021"
 clarity = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 serde_json = { workspace = true }
-yaml_serde = { workspace = true }
+serde-saphyr = { workspace = true }
 strum = { workspace = true, features = ["derive"] }
 reqwest = { workspace = true }
 stacks-common = { workspace = true, default-features = false }
@@ -22,6 +22,7 @@ stacks-rpc-client = { path = "../stacks-rpc-client", features = ["mock"] }
 mockito = { workspace = true }
 pretty_assertions = { workspace = true }
 tempfile = { workspace = true }
+test-case = { workspace = true }
 tokio = { workspace = true }
 toml = { workspace = true }
 
@@ -34,7 +35,6 @@ bitcoin = { workspace = true }
 bitcoincore-rpc = { workspace= true }
 bitcoincore-rpc-json = { workspace= true }
 base58 = { workspace = true }
-libsecp256k1 = { workspace = true }
 stacks-codec = { workspace = true }
 clarinet-utils = { path = "../clarinet-utils" }
 stacks-rpc-client = { path = "../stacks-rpc-client" }

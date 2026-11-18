@@ -201,18 +201,47 @@ enum FormatterInputSource {
     Stdin,
 }
 
+struct FormattedSource {
+    changed: bool,
+    formatted: String,
+}
+
 impl FormatterInputSource {
-    fn get_input(&self) -> String {
+    fn get_input(&self) -> io::Result<String> {
         match self {
-            FormatterInputSource::File(path, _) => {
-                fs::read_to_string(path).unwrap_or_else(|e| panic!("Failed to read file: {e}"))
-            }
-            FormatterInputSource::Stdin => io::stdin()
+            FormatterInputSource::File(path, _) => fs::read_to_string(path),
+            FormatterInputSource::Stdin => Ok(io::stdin()
                 .lines()
-                .map_while(Result::ok)
-                .collect::<Vec<_>>()
-                .join("\n"),
+                .collect::<io::Result<Vec<_>>>()?
+                .join("\n")),
         }
+    }
+
+    /// Read or parse failures are rendered as `clarinet check` renders them.
+    fn read_and_format(&self, formatter: &ClarityFormatter) -> Result<FormattedSource, String> {
+        let name = self.file_path().unwrap_or("<stdin>");
+        let original = self.get_input().map_err(|e| {
+            format_err!(match self.file_path() {
+                Some(path) => format!("unable to read file: '{path}': {e}"),
+                None => format!("unable to read stdin: {e}"),
+            })
+        })?;
+        let formatted = formatter
+            .format(&original, self.epoch())
+            .map_err(|failure| {
+                let lines: Vec<String> = original.lines().map(String::from).collect();
+                failure
+                    .into_iter()
+                    .flat_map(|diagnostic| {
+                        output_diagnostic(&LintDiagnostic::from(diagnostic), name, &lines)
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            })?;
+        Ok(FormattedSource {
+            changed: original != formatted,
+            formatted,
+        })
     }
 
     fn file_path(&self) -> Option<&str> {
@@ -227,10 +256,6 @@ impl FormatterInputSource {
             FormatterInputSource::File(_, epoch) => *epoch,
             FormatterInputSource::Stdin => None,
         }
-    }
-
-    fn is_stdin(&self) -> bool {
-        matches!(self, FormatterInputSource::Stdin)
     }
 }
 
@@ -278,7 +303,7 @@ enum Deployments {
 #[derive(Parser, PartialEq, Clone, Debug)]
 struct EncryptDeployment {
     /// Encryption strength
-    #[clap(long = "strength", default_value = "medium")]
+    #[clap(long = "strength", default_value_t)]
     pub strength: clarinet_utils::MnemonicEncryptionStrength,
 }
 
@@ -1037,16 +1062,7 @@ pub fn main() {
                 let encrypted_mnemonic =
                     clarinet_utils::encrypt_mnemonic_phrase(phrase, &password, cmd.strength)
                         .unwrap();
-                let key = match cmd.strength {
-                    clarinet_utils::MnemonicEncryptionStrength::Basic => "encrypted_mnemonic",
-                    clarinet_utils::MnemonicEncryptionStrength::Medium => {
-                        "encrypted_mnemonic_medium"
-                    }
-                    clarinet_utils::MnemonicEncryptionStrength::High => "encrypted_mnemonic_high",
-                    clarinet_utils::MnemonicEncryptionStrength::Extreme => {
-                        "encrypted_mnemonic_extreme"
-                    }
-                };
+                let key = cmd.strength.manifest_key();
                 println!("{key} = \"{encrypted_mnemonic}\"");
                 std::process::exit(0);
             }
@@ -1534,6 +1550,10 @@ pub fn main() {
                 "{}",
                 format_warn!("This command is in beta. Feedback is welcome!"),
             );
+            if !(cmd.check || cmd.in_place || cmd.dry_run || cmd.stdin) {
+                eprintln!("required flags: in-place, dry-run, or check");
+                std::process::exit(1);
+            }
             let manifest = load_manifest_or_exit(cmd.manifest_path.clone(), false);
             let sources = cmd.get_input_sources(&manifest);
             let mut settings = formatter::Settings::default();
@@ -1550,53 +1570,66 @@ pub fn main() {
             }
             let formatter = ClarityFormatter::new(settings);
 
-            let mut all_files_formatted = true;
             let mut unformatted_files = Vec::new();
+            let mut failed_files = 0;
 
             for source in sources {
-                let input = source.get_input();
-                let output = formatter.format(&input, source.epoch());
+                let FormattedSource { changed, formatted } =
+                    match source.read_and_format(&formatter) {
+                        Ok(result) => result,
+                        Err(error) => {
+                            eprintln!("{error}");
+                            failed_files += 1;
+                            continue;
+                        }
+                    };
 
                 if cmd.check {
-                    if let Some(file_path) = source.file_path() {
-                        if input != output {
-                            all_files_formatted = false;
-                            unformatted_files.push(file_path.to_string());
-                        }
+                    if changed {
+                        unformatted_files.extend(source.file_path().map(String::from));
                     }
                 } else if cmd.in_place {
                     let file_path = source
                         .file_path()
                         .expect("No file path for in-place formatting");
-                    let _ = overwrite_formatted(file_path, &output);
-                } else if cmd.dry_run || source.is_stdin() {
-                    println!("{output}");
+                    let _ = overwrite_formatted(file_path, &formatted);
                 } else {
-                    eprintln!("required flags: in-place, dry-run, or check");
-                    std::process::exit(1);
+                    println!("{formatted}");
                 }
             }
 
-            if cmd.check {
-                if all_files_formatted {
-                    println!("{} All files are properly formatted", green!("✔"));
-                    std::process::exit(0);
-                } else {
-                    eprintln!(
-                        "{} {} {} formatting",
-                        red!("✗"),
-                        unformatted_files.len(),
-                        if unformatted_files.len() == 1 {
-                            "file needs"
-                        } else {
-                            "files need"
-                        }
-                    );
-                    for file in unformatted_files {
-                        eprintln!("  {file}");
+            if failed_files > 0 {
+                eprintln!(
+                    "{} {} could not be read or parsed",
+                    red!("✗"),
+                    pluralize!(failed_files, "file")
+                );
+            }
+
+            if !unformatted_files.is_empty() {
+                eprintln!(
+                    "{} {} {} formatting",
+                    red!("✗"),
+                    unformatted_files.len(),
+                    if unformatted_files.len() == 1 {
+                        "file needs"
+                    } else {
+                        "files need"
                     }
-                    std::process::exit(1);
+                );
+                for file in unformatted_files {
+                    eprintln!("  {file}");
                 }
+                std::process::exit(1);
+            }
+
+            if failed_files > 0 {
+                std::process::exit(1);
+            }
+
+            if cmd.check {
+                println!("{} All files are properly formatted", green!("✔"));
+                std::process::exit(0);
             }
         }
         Command::Devnet(subcommand) => match subcommand {
@@ -1928,7 +1961,9 @@ fn load_deployment_if_exists(
                     .to_file_content(project_root)
                     .map_err(|err| format!("failed serializing deployment\n{err}"))?;
 
-                if updated_version == current_version {
+                if updated_version == current_version
+                    || deployment.matches_file_content(&current_version, project_root)
+                {
                     return load_deployment(project_root, &default_deployment_location).map(Some);
                 }
 
