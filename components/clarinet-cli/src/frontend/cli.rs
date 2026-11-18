@@ -13,7 +13,9 @@ use clarinet_deployments::onchain::{
     apply_on_chain_deployment, get_initial_transactions_trackers, update_deployment_costs,
     DeploymentCommand, DeploymentEvent,
 };
-use clarinet_deployments::types::{DeploymentGenerationArtifacts, DeploymentSpecification};
+use clarinet_deployments::types::{
+    DeploymentGenerationArtifacts, DeploymentSpecification, DeploymentSpecificationFile,
+};
 use clarinet_deployments::{
     get_default_deployment_path, load_deployment, setup_session_with_deployment,
 };
@@ -1979,16 +1981,6 @@ fn load_deployment_if_exists(
         return Ok(None);
     }
 
-    if plan_update == PlanUpdate::InMemory {
-        return generate_default_deployment(
-            manifest,
-            network,
-            true,
-            network.deployment_environment(),
-        )
-        .map(|(deployment, _, _)| Some(deployment));
-    }
-
     if plan_update != PlanUpdate::OnDisk {
         match generate_default_deployment(manifest, network, true, network.deployment_environment())
         {
@@ -2004,6 +1996,27 @@ fn load_deployment_if_exists(
                     || deployment.matches_file_content(&current_version, project_root)
                 {
                     return load_deployment(project_root, &default_deployment_location).map(Some);
+                }
+
+                if plan_update == PlanUpdate::InMemory {
+                    // Keep user-added transactions without touching the file. Publish
+                    // transactions come from the manifest, and their sources may be gone.
+                    let mut spec_file =
+                        DeploymentSpecificationFile::from_file_content(&current_version)?;
+                    if let Some(plan) = &mut spec_file.plan {
+                        plan.batches
+                            .iter_mut()
+                            .for_each(|batch| batch.remove_publish_transactions());
+                    }
+                    let existing = DeploymentSpecification::from_specifications(
+                        &spec_file,
+                        network,
+                        project_root,
+                        None,
+                    )?;
+                    let mut deployment = deployment;
+                    deployment.merge_batches(existing.plan.batches);
+                    return Ok(Some(deployment));
                 }
 
                 if plan_update == PlanUpdate::Prompt {
@@ -2041,6 +2054,7 @@ fn load_deployment_if_exists(
                     Ok(Some(deployment))
                 }
             }
+            Err(message) if plan_update == PlanUpdate::InMemory => Err(message),
             Err(message) => {
                 eprintln!(
                     "{} unable to compute an updated plan\n{}",
