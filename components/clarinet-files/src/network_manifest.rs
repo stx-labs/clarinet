@@ -388,7 +388,8 @@ impl NetworkManifest {
         let location = paths::get_network_manifest_path(project_root, &networks.1);
         let network_manifest_file_content = paths::read_content(&location)?;
         let mut network_manifest_file: NetworkManifestFile =
-            toml::from_slice(&network_manifest_file_content[..]).unwrap();
+            toml::from_slice(&network_manifest_file_content)
+                .map_err(|e| format!("unable to parse {}: {e}", location.display()))?;
         NetworkManifest::from_network_manifest_file(
             &mut network_manifest_file,
             networks,
@@ -403,13 +404,14 @@ impl NetworkManifest {
         use_mainnet_wallets: bool,
         file_accessor: &dyn FileAccessor,
     ) -> Result<NetworkManifest, String> {
-        let network_manifest_location = project_root.join("settings/Devnet.toml");
+        let location = project_root.join("settings/Devnet.toml");
         let content = file_accessor
-            .read_file(network_manifest_location.to_string_lossy().into_owned())
+            .read_file(location.to_string_lossy().into_owned())
             .await?;
 
         let mut network_manifest_file: NetworkManifestFile =
-            toml::from_slice(content.as_bytes()).unwrap();
+            toml::from_slice(content.as_bytes())
+                .map_err(|e| format!("unable to parse {}: {e}", location.display()))?;
         NetworkManifest::from_network_manifest_file(
             &mut network_manifest_file,
             networks,
