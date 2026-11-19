@@ -77,6 +77,10 @@
           # Skip tests that require network access or additional setup
           doCheck = false;
 
+          # nixpkgs' cargoUseSystemLibs hook forces system libraries over
+          # vendored ones; keep bundled SQLite and vendored jemalloc
+          dontCargoUseSystemLibs = true;
+
           passthru = {
             rustc = rustToolchain;
           };
