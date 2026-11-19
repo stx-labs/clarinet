@@ -43,9 +43,7 @@ impl From<&MapData<'_>> for Usage {
     }
 }
 
-struct UnusedMapSettings {
-    // TODO
-}
+struct UnusedMapSettings {}
 
 impl UnusedMapSettings {
     fn new() -> Self {

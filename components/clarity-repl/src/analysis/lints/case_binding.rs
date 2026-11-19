@@ -15,9 +15,7 @@ use crate::analysis::linter::Lint;
 use crate::analysis::util::{match_kebab_case, strip_unused_suffix, CaseError};
 use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
-struct CaseBindingSettings {
-    // TODO
-}
+struct CaseBindingSettings {}
 
 impl CaseBindingSettings {
     fn new() -> Self {

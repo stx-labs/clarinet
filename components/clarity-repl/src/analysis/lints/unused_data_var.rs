@@ -17,9 +17,7 @@ use crate::analysis::linter::Lint;
 use crate::analysis::util::is_explicitly_unused;
 use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
-struct UnusedDataVarSettings {
-    // TODO
-}
+struct UnusedDataVarSettings {}
 
 impl UnusedDataVarSettings {
     fn new() -> Self {

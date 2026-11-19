@@ -6,7 +6,6 @@ use observer::types::{BitcoinChainEvent, StacksChainEvent};
 use crate::chains_coordinator::BitcoinMiningCommand;
 use crate::log::{LogData, LogLevel};
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum DevnetEvent {
     Log(LogData),
@@ -22,13 +21,11 @@ pub enum DevnetEvent {
     Terminate,
 }
 
-#[allow(dead_code)]
 impl DevnetEvent {
     pub fn error(message: String) -> DevnetEvent {
         DevnetEvent::Log(Self::log_error(message))
     }
 
-    #[allow(dead_code)]
     pub fn warning(message: String) -> DevnetEvent {
         DevnetEvent::Log(Self::log_warning(message))
     }

@@ -237,8 +237,7 @@ fn draw_block_details(f: &mut Frame, area: Rect, block: &StacksBlockData) {
     let paragraph = Paragraph::new(label);
     f.render_widget(paragraph, labels[9]);
 
-    // TODO: Add more PoX data (from pox_info)
-    // TODO(ludo): Mining informations (miner, VRF)
+    // TODO: show more PoX data (from pox_info) and mining information (miner, VRF).
 }
 
 fn draw_microblock_details(f: &mut Frame, area: Rect, microblock: &StacksMicroblockData) {

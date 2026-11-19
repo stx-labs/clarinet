@@ -126,7 +126,6 @@ pub struct NewBitcoinBlock {
     pub burn_amount: u64,
 }
 
-#[allow(dead_code)]
 #[derive(Deserialize, Serialize)]
 pub struct RewardParticipant {
     recipient: String,
@@ -141,6 +140,9 @@ pub fn build_http_client() -> HttpClient {
         .connect_timeout(Duration::from_secs(15))
         .tcp_keepalive(Some(Duration::from_secs(15)))
         .no_proxy()
+        // This client only talks to the bitcoind RPC endpoint from the observer config
+        // (the devnet's local node by default), which is plain HTTP or a self-signed cert.
+        // Don't reuse it for public endpoints.
         .danger_accept_invalid_certs(true)
         .build()
         .expect("Unable to build http client")
@@ -644,17 +646,6 @@ fn try_parse_stacks_operation(
                     None => (0, None),
                 };
 
-            // let mining_address_pre_commit = match inputs[0].script_sig {
-            //     Some(script) => match script.script() {
-
-            //     }
-
-            // }
-            // mining_address_post_commit = match inputs.first().and_then(|i| i.script_sig).and_then(|s| s.script()).script_pub_key.script() {
-            //     Ok(script) => Address::from_script(&script, bitcoin::Network::Bitcoin).and_then(|a| Ok(a.to_string())).ok(),
-            //     Err(_) => None
-            // };
-
             let pox_cycle_index = pox_config.get_pox_cycle_id(block_height);
             let pox_cycle_length = pox_config.get_pox_cycle_len();
             let pox_cycle_position = pox_config.get_pos_in_pox_cycle(block_height);
@@ -666,7 +657,6 @@ fn try_parse_stacks_operation(
                 pox_cycle_position,
                 pox_sats_burnt,
                 pox_sats_transferred,
-                // mining_address_pre_commit: None,
                 mining_address_post_commit,
                 mining_sats_left,
             })
@@ -699,7 +689,7 @@ fn try_parse_transfer_stx_op(bytes: &[u8]) -> Option<TransferSTXData> {
         return None;
     }
 
-    // todo(lgalabru)
+    // TODO: decode the transfer-stx payload. Sender, recipient and amount are left empty.
     Some(TransferSTXData {
         sender: "".into(),
         recipient: "".into(),
@@ -712,7 +702,8 @@ fn try_parse_stacks_stx_op(bytes: &[u8]) -> Option<LockSTXData> {
         return None;
     }
 
-    // todo(lgalabru)
+    // TODO: decode the stack-stx payload. Sender and amount are left empty and the
+    // duration is a placeholder.
     Some(LockSTXData {
         sender: "".into(),
         amount: "".into(),

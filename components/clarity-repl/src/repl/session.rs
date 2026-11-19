@@ -3285,8 +3285,10 @@ mod tests {
 
     #[test]
     fn burn_block_height_behavior_epoch3_0() {
-        // test that clarinet preserves the 3.0 and 3.1 special behavior of burn-block-height
-        // https://github.com/stacks-network/stacks-core/pull/5524
+        // From epoch 3.0, `burn-block-height` inside `at-block` returns the current burn
+        // chain tip rather than the burn height at the target block, and simnet matches the
+        // node. stacks-core#5524 proposed changing this but was closed without merging
+        // (context: clarinet#1615).
         let mut session = Session::new(SessionSettings::default());
         session.update_epoch(StacksEpochId::Epoch30);
 

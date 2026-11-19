@@ -444,13 +444,14 @@ pub async fn start_chains_coordinator(
                             None => unreachable!(),
                         }
                     }
+                    // Devnet runs stacks-node with `mine_microblocks = false`, so the two
+                    // microblock events below aren't expected here.
                     StacksChainEvent::ChainUpdatedWithMicroblocks(_) => {
                         let _ = devnet_event_tx.send(DevnetEvent::StacksChainEvent(chain_event));
                         continue;
-                        // TODO(lgalabru): good enough for now
                     }
                     StacksChainEvent::ChainUpdatedWithMicroblocksReorg(_) => {
-                        unreachable!() // TODO(lgalabru): good enough for now - code path unreachable in the context of Devnet
+                        unreachable!()
                     }
                     StacksChainEvent::ChainUpdatedWithReorg(data) => {
                         // reorgs should not happen in devnet

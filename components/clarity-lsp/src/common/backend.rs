@@ -246,7 +246,7 @@ pub async fn process_notification(
                         .map(|metadata| (metadata.clarity_version, metadata.deployer.clone()))
                 })?;
 
-                // if the contract isn't in lookup yet, fallback on manifest, to be improved in #668
+                // if the contract isn't in lookup yet, fall back on the manifest
                 let clarity_version = match metadata {
                     Some((clarity_version, _)) => clarity_version,
                     None => {
@@ -334,7 +334,9 @@ pub async fn process_notification(
                 manifest_location,
                 file_accessor,
                 static_cost_analysis,
-                // TODO(): introduce partial analysis #604
+                // Every save re-analyzes the whole project. Unchanged contracts reuse their
+                // cached ASTs (#2174), but analysis isn't limited to the saved contract
+                // and the contracts that depend on it.
                 |es| {
                     if let Some(contract) = es.active_contracts.get_mut(&contract_location) {
                         contract.update_definitions();

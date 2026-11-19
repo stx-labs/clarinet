@@ -15,9 +15,7 @@ use crate::analysis::linter::Lint;
 use crate::analysis::util::{match_screaming_snake_case, CaseError};
 use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
-struct UnusedConstSettings {
-    // TODO
-}
+struct UnusedConstSettings {}
 
 impl UnusedConstSettings {
     fn new() -> Self {

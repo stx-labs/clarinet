@@ -520,7 +520,7 @@ impl BtcTransferSpecification {
     pub fn from_specifications(
         specs: &BtcTransferSpecificationFile,
     ) -> Result<BtcTransferSpecification, String> {
-        // TODO(lgalabru): Data validation
+        // TODO: validate the sender and recipient addresses and the amounts; they're copied as-is.
         Ok(BtcTransferSpecification {
             expected_sender: specs.expected_sender.clone(),
             recipient: specs.recipient.clone(),

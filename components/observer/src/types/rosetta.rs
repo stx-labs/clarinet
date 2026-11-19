@@ -256,7 +256,7 @@ pub struct StacksTransactionMetadata {
     pub contract_abi: Option<ContractInterface>,
 }
 
-/// TODO
+/// Where a transaction was included: an anchor block or, before Nakamoto, a microblock.
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
 #[serde(untagged)]
 pub enum StacksTransactionPosition {
@@ -456,9 +456,6 @@ pub struct OperationMetadata {
     /// Has to be specified for ADD_KEY, REMOVE_KEY, and STAKE operations
     #[serde(skip_serializing_if = "Option::is_none")]
     pub public_key: Option<PublicKey>,
-    // TODO(lgalabru): ???
-    //#[serde(skip_serializing_if = "Option::is_none")]
-    // pub access_key: Option<TODO>,
     /// Has to be specified for DEPLOY_CONTRACT operation
     #[serde(skip_serializing_if = "Option::is_none")]
     pub code: Option<String>,
@@ -649,7 +646,6 @@ pub struct CurrencyMetadata {
     pub standard: CurrencyStandard,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum BlockchainEvent {
     BlockchainUpdatedWithHeaders(BlockchainUpdatedWithHeaders),
@@ -688,7 +684,6 @@ pub struct BlockHeader {
     pub parent_block_identifier: BlockIdentifier,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum BitcoinChainEvent {
     ChainUpdatedWithBlocks(BitcoinChainUpdatedWithBlocksData),
@@ -713,7 +708,6 @@ pub struct StacksChainUpdatedWithNonConsensusEventsData {
     pub events: Vec<StacksNonConsensusEventData>,
 }
 
-#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub enum StacksChainEvent {
     ChainUpdatedWithBlocks(StacksChainUpdatedWithBlocksData),
@@ -870,7 +864,6 @@ impl StacksNetwork {
     }
 }
 
-#[allow(dead_code)]
 #[derive(Debug, PartialEq, Eq, Clone, PartialOrd, Ord, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum BitcoinNetwork {

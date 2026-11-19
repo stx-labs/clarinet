@@ -849,10 +849,8 @@ impl ProtocolState {
             HashMap<String, (StaticCost, Option<HashMap<String, (u64, u64)>>)>,
         >,
     ) {
-        // Remove old paths
-        // TODO(lgalabru)
-
-        // Add / Replace new paths
+        // `self` is a fresh `ProtocolState` for every build (see `build_and_commit`),
+        // so there are no old paths to remove before adding the new ones.
         for (contract_id, contract_location) in locations.iter() {
             let Some((contract_id, ast)) = asts.remove_entry(contract_id) else {
                 continue;

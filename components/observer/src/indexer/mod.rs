@@ -418,8 +418,7 @@ impl ChainSegment {
                         }
                     }
                     ChainSegmentIncompatibility::OutdatedSegment => {
-                        // TODO(lgalabru): test depth
-                        // fork_ids_to_prune.push(fork_id);
+                        // Outdated segments are left in place; nothing prunes them here.
                     }
                     ChainSegmentIncompatibility::ParentBlockUnknown => {}
                     ChainSegmentIncompatibility::OutdatedBlock => {}

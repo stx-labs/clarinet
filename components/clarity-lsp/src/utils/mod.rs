@@ -67,7 +67,7 @@ pub fn clarity_diagnostic_to_lsp_type(
 
     let code = lint_name.map(|name| NumberOrString::String(name.to_string()));
 
-    // TODO(lgalabru): add hint for contracts not found errors
+    // TODO: add a hint to contract-not-found errors.
     LspDiagnostic {
         range,
         severity: match diagnostic.level {
