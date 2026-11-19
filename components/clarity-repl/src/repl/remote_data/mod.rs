@@ -197,7 +197,8 @@ pub struct Sortition {
     pub sortition_id: SortitionId,
     #[serde(deserialize_with = "deserialize_sortition_id")]
     pub parent_sortition_id: SortitionId,
-    // @todo: remove serde(default) and Option<> when stacks-network#5772 is merged
+    // `/v3/sortitions` returns `vrf_seed` since stacks-core#5772, but it stays optional
+    // because the fallback in `fetch_sortition` has no seed and sets it to `None`.
     #[serde(default, deserialize_with = "deserialize_vrf_seed")]
     pub vrf_seed: Option<VRFSeed>,
 }
@@ -531,7 +532,8 @@ mod tests {
         assert_eq!(info.stacks_tip_height, 556946);
     }
 
-    // we should better handle network errors. tracked in #1646
+    // `fetch_info` and `fetch_block` unwrap the HTTP result, so a network or API error
+    // (here a 404) panics. This test pins that until they return a `Result`.
     #[test]
     #[should_panic]
     fn test_http_client_error() {
