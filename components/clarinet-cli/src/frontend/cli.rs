@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs::{self, File};
 use std::io::prelude::*;
-use std::io::{self, IsTerminal};
+use std::io::{self};
 use std::path::{Path, PathBuf};
 use std::{env, process};
 
@@ -617,10 +617,6 @@ struct Completions {
 }
 
 pub fn main() {
-    if !io::stdout().is_terminal() {
-        colored::control::set_override(false);
-    }
-
     let opts: Opts = match Opts::try_parse() {
         Ok(opts) => opts,
         Err(e) => {
@@ -1235,17 +1231,12 @@ pub fn main() {
                 let reload = if interactive {
                     terminal.start()
                 } else {
-                    let mut reload = false;
-                    for expression in expressions.by_ref() {
-                        if expression == "::reload" {
-                            reload = true;
-                            break;
-                        }
-                        if terminal.eval(expression).is_err() {
-                            std::process::exit(1);
-                        }
-                    }
-                    reload
+                    // Stop at `::reload`, exit on the first error.
+                    expressions.by_ref().any(|expression| {
+                        terminal
+                            .eval(expression)
+                            .unwrap_or_else(|_| process::exit(1))
+                    })
                 };
 
                 // Report telemetry

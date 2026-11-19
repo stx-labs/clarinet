@@ -72,19 +72,22 @@ impl Terminal {
         }
     }
 
-    pub fn eval(&mut self, input: &str) -> Result<(), String> {
+    /// Evaluates one console input, routed like `Session::process_console_input`.
+    /// Returns `Ok(true)` when the input requests a reload.
+    pub fn eval(&mut self, input: &str) -> Result<bool, String> {
         self.executed.push(input.to_string());
-        let result = if let Some(filename) = input.strip_prefix("::read ") {
-            std::fs::read_to_string(filename)
-                .map_err(|error| format!("unable to read {filename}: {error}"))
-                .and_then(|snippet| self.eval_snippet(&snippet, self.session.show_costs))
+        if input.starts_with("::reload") {
+            return Ok(true);
+        }
+        let result = if input.starts_with("::read") {
+            match input.split_once(' ') {
+                Some((_, filename)) => std::fs::read_to_string(filename)
+                    .map_err(|error| format!("unable to read {filename}: {error}"))
+                    .and_then(|snippet| self.eval_snippet(&snippet, self.session.show_costs)),
+                None => Err("Usage: ::read <filename>".into()),
+            }
         } else if input.starts_with("::debug") {
             Err("::debug requires an interactive console".into())
-        } else if input.starts_with("::get_costs") {
-            match input.split_once(' ') {
-                Some((_, snippet)) => self.eval_snippet(snippet, true),
-                None => Err("Usage: ::get_costs <expr>".into()),
-            }
         } else if input.starts_with("::trace") || input.starts_with("::perf") {
             let mut output = vec![];
             let result = if input.starts_with("::trace") {
@@ -92,9 +95,21 @@ impl Terminal {
             } else {
                 self.session.perf(&mut output, input)
             };
-            result
-                .map(|_| output.join("\n"))
-                .map_err(|errors| errors.join("\n"))
+            match result {
+                Ok(()) => Ok(output.join("\n")),
+                Err(errors) => {
+                    // Like the console, show the partial trace before the error.
+                    if !output.is_empty() {
+                        println!("{}", output.join("\n"));
+                    }
+                    Err(errors.join("\n"))
+                }
+            }
+        } else if input.starts_with("::get_costs") {
+            match input.split_once(' ') {
+                Some((_, snippet)) => self.eval_snippet(snippet, true),
+                None => Err("Usage: ::get_costs <expr>".into()),
+            }
         } else if input.starts_with("::") {
             self.session.handle_command_result(input)
         } else {
@@ -103,7 +118,7 @@ impl Terminal {
         match result {
             Ok(output) => {
                 println!("{output}");
-                Ok(())
+                Ok(false)
             }
             Err(error) => {
                 eprintln!("{error}");

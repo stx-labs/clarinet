@@ -47,7 +47,6 @@ fn run_console_command(args: &[&str], commands: &[&str]) -> Vec<String> {
         .current_dir(&temp_dir)
         // Rustyline prints prompts when TERM identifies an unsupported terminal.
         .env("TERM", "xterm-256color")
-        .env("CLICOLOR_FORCE", "1")
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -145,6 +144,13 @@ fn eval_is_quiet_and_stops_on_the_first_error() {
             true,
             "",
         ),
+        // Same prefix match as the interactive console.
+        (
+            vec!["-e", "(+ 1 1)", "-e", "::reload_typo", "-e", "(+ 2 2)"],
+            "2\n4\n",
+            true,
+            "",
+        ),
         (
             vec!["--eval", "(+ 1 1)", "-e", "(+ 1 u1)", "-e", "(+ 2 2)"],
             "2\n",
@@ -161,7 +167,6 @@ fn eval_is_quiet_and_stops_on_the_first_error() {
         let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
             .arg("console")
             .args(args)
-            .env("CLICOLOR_FORCE", "1")
             .current_dir(&temp_dir)
             .output()
             .unwrap();
@@ -341,7 +346,7 @@ fn eval_command_errors_stop_evaluation() {
         "::advance_chain_tip invalid",
         "::set_epoch invalid",
         "::unknown",
-        "::reload_typo",
+        "::read",
         "::read missing.clar",
         "::encode (+ 1 u1)",
         "::decode invalid",
@@ -356,7 +361,8 @@ fn eval_command_errors_stop_evaluation() {
             .output()
             .unwrap();
         assert!(!output.status.success(), "{command}");
-        assert!(output.stdout.is_empty(), "{command}");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(!stdout.lines().any(|line| line == "4"), "{command}");
         assert!(!output.stderr.is_empty(), "{command}");
     }
 }
