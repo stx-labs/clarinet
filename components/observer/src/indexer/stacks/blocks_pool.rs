@@ -402,7 +402,8 @@ impl StacksBlockPool {
             self.block_store.remove(&block_to_prune);
             self.micro_forks.remove(&block_to_prune);
             self.canonical_micro_fork_id.remove(&block_to_prune);
-            // TODO(lgalabru): cascade pruning down to micro_orphans and microblocks_store
+            // `micro_orphans` and `microblocks_store` are not pruned here. They only hold
+            // microblock data, which stopped being produced when epoch 2.5 disabled microblocks.
         }
         for fork_id in forks_to_prune {
             self.forks.remove(&fork_id);
@@ -436,8 +437,8 @@ impl StacksBlockPool {
         let mut anchor_block_updated = None;
 
         for mut microblock in microblocks.into_iter() {
-            // Temporary patch: the event observer is not returning the block height of the anchor block,
-            // we're using the local state to retrieve this missing piece of data.
+            // The node's microblock event doesn't include the anchor block's height,
+            // so fill it in from the anchor block we already have in local state.
             if let Some(block) = self
                 .block_store
                 .get(&microblock.metadata.anchor_block_identifier)

@@ -719,8 +719,7 @@ pub fn main() {
                                     )
                                 );
                             }
-                            // TODO(lgalabru): once we have a privacy policy available, add a link
-                            // println!("{}", yellow!("Visit http://hiro.so/clarinet-privacy for details."));
+                            // TODO: link to a telemetry privacy policy here once one is published.
                             println!("{}", yellow!("Enable [Y/n]?"));
                             let mut buffer = String::new();
                             std::io::stdin().read_line(&mut buffer).unwrap();

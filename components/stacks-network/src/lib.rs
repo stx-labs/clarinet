@@ -35,7 +35,6 @@ use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use self::chains_coordinator::DevnetEventObserverConfig;
 use self::snapshot_extractor::{SnapshotImages, SnapshotPlan};
 
-#[allow(dead_code)]
 #[derive(Debug)]
 pub enum ChainsCoordinatorCommand {
     Terminate,

@@ -127,19 +127,15 @@ async fn handle_new_stacks_block(
     // Standardize the structure of the block, and identify the
     // kind of update that this new block would imply, taking
     // into account the last 7 blocks.
-    // TODO(lgalabru): use _pox_config
-    let (_pox_config, chain_event, _new_tip) = match indexer_rw_lock.write() {
+    let chain_event = match indexer_rw_lock.write() {
         Ok(mut indexer) => {
-            let pox_config = indexer.get_pox_config();
             let block = match indexer.standardize_stacks_marshalled_block(marshalled_block, &ctx) {
                 Ok(block) => block,
                 Err(e) => {
                     return error_response(format!("Unable to standardize stacks block {e}"), &ctx);
                 }
             };
-            let new_tip = block.block_identifier.index;
-            let chain_event = indexer.process_stacks_block(block, &ctx);
-            (pox_config, chain_event, new_tip)
+            indexer.process_stacks_block(block, &ctx)
         }
         Err(e) => {
             return error_response(format!("Unable to acquire indexer_rw_lock: {e}"), &ctx);
@@ -308,7 +304,7 @@ async fn handle_drop_mempool_tx(
         ctx,
     } = app_state;
     ctx.try_log(|logger| slog::debug!(logger, "POST /drop_mempool_tx {:?}", payload));
-    // TODO(lgalabru): use propagate mempool events
+    // TODO: propagate dropped mempool transactions to observers. They're only logged for now.
     Json(json!({
         "status": 200,
         "result": "Ok",
