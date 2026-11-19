@@ -56,9 +56,10 @@ pub(crate) fn calculate_function_cost(
 pub(crate) fn is_branching_function(function_name: &ClarityName) -> bool {
     match function_name.as_str() {
         "if" | "match" => true,
-        "unwrap!" | "unwrap-err!" => false, // XXX: currently unwrap and
-        // unwrap-err traverse both branches regardless of result, so until this is
-        // fixed in clarity we'll set this to false
+        // `unwrap!` and `unwrap-err!` currently evaluate both branches regardless of the
+        // result, so they are not treated as branching until that is fixed in Clarity:
+        // https://github.com/clarity-lang/reference/issues/59
+        "unwrap!" | "unwrap-err!" => false,
         _ => false,
     }
 }

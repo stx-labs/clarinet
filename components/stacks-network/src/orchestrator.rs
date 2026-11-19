@@ -1833,7 +1833,6 @@ impl DevnetOrchestrator {
                             Err(e) => {
                                 let err = r.text().await;
                                 let msg = format!("{err:?}");
-                                println!("msg: {msg}");
                                 let _ = devnet_event_tx.send(DevnetEvent::error(msg));
 
                                 error_count += 1;

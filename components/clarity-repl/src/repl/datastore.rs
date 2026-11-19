@@ -12,7 +12,7 @@ use clarity::types::StacksEpochId;
 use clarity::util::hash::Sha512Trunc256Sum;
 use clarity::vm::analysis::{AnalysisDatabase, ContractAnalysis};
 use clarity::vm::ast::build_ast;
-use clarity::vm::database::clarity_db::ContractDataVarName;
+use clarity::vm::database::clarity_db::{ContractDataVarName, CLARITY_STORAGE_BLOCK_TIME_KEY};
 use clarity::vm::database::clarity_store::ContractCommitment;
 use clarity::vm::database::{
     BurnStateDB, ClarityBackingStore, ClarityDatabase, ClaritySerializable, HeadersDB, StoreType,
@@ -37,9 +37,6 @@ use super::remote_data::fs::{get_file_from_cache, write_file_to_cache};
 use super::remote_data::{epoch_for_height, Block, HttpClient, Sortition};
 use super::settings::RemoteNetworkInfo;
 use crate::repl::remote_data::context;
-
-// todo: export it from clarity
-const CLARITY_STORAGE_BLOCK_TIME_KEY: &str = "_stx-data::clarity_storage::block_time";
 
 const SECONDS_BETWEEN_BURN_BLOCKS: u64 = 600;
 const SECONDS_BETWEEN_STACKS_BLOCKS: u64 = 10;

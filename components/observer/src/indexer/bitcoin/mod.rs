@@ -140,6 +140,9 @@ pub fn build_http_client() -> HttpClient {
         .connect_timeout(Duration::from_secs(15))
         .tcp_keepalive(Some(Duration::from_secs(15)))
         .no_proxy()
+        // This client only talks to the bitcoind RPC endpoint from the observer config
+        // (the devnet's local node by default), which is plain HTTP or a self-signed cert.
+        // Don't reuse it for public endpoints.
         .danger_accept_invalid_certs(true)
         .build()
         .expect("Unable to build http client")

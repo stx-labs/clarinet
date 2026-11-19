@@ -44,9 +44,7 @@ use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
-struct NoopCheckerSettings {
-    // TODO
-}
+struct NoopCheckerSettings {}
 
 impl NoopCheckerSettings {
     fn new() -> Self {

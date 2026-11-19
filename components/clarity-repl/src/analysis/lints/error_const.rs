@@ -21,9 +21,7 @@ use crate::analysis::cache::AnalysisCache;
 use crate::analysis::linter::Lint;
 use crate::analysis::{AnalysisPass, AnalysisResult, LintName};
 
-struct ErrorConstSettings {
-    // TODO
-}
+struct ErrorConstSettings {}
 
 impl ErrorConstSettings {
     fn new() -> Self {
