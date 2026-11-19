@@ -69,6 +69,10 @@
 
           buildInputs = [
             pkgs.openssl
+            # nixpkgs' cargoUseSystemLibs hook sets LIBSQLITE3_SYS_USE_PKG_CONFIG,
+            # which overrides rusqlite's `bundled` feature and links the system
+            # SQLite instead.
+            pkgs.sqlite
           ]
           ++ pkgs.lib.optionals pkgs.stdenv.hostPlatform.isDarwin [
             pkgs.apple-sdk_15
