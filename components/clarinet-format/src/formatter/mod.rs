@@ -480,9 +480,9 @@ impl<'a> Aggregator<'a> {
     ) -> String {
         if let Some(native) = NativeFunctions::lookup_by_name(atom_name) {
             match native {
-                NativeFunctions::Let => self.format_let(list, indent),
+                NativeFunctions::Let => self.format_let(expr, list, indent),
                 NativeFunctions::Begin => self.format_begin(list, indent),
-                NativeFunctions::Match => self.format_match(list, indent),
+                NativeFunctions::Match => self.format_match(expr, list, indent),
                 NativeFunctions::TupleCons => {
                     if let Some(formatted) = self.format_key_value(&list[1..], indent) {
                         formatted
@@ -493,7 +493,7 @@ impl<'a> Aggregator<'a> {
                 NativeFunctions::If => self.format_if(list, indent),
                 NativeFunctions::And | NativeFunctions::Or => self.format_booleans(list, indent),
                 NativeFunctions::ListCons => self.format_list(list, indent),
-                NativeFunctions::RestrictAssets => self.format_restrict_assets(list, indent),
+                NativeFunctions::RestrictAssets => self.format_restrict_assets(expr, list, indent),
                 _ => self.format_inner_content(list, indent),
             }
         } else if let Some(define) = DefineFunctions::lookup_by_name(atom_name) {
@@ -507,7 +507,7 @@ impl<'a> Aggregator<'a> {
                 | DefineFunctions::ImplTrait
                 | DefineFunctions::UseTrait
                 | DefineFunctions::NonFungibleToken => self.format_constant(list, indent),
-                DefineFunctions::Map => self.format_map(list, indent),
+                DefineFunctions::Map => self.format_map(expr, list, indent),
                 DefineFunctions::Trait => self.define_trait(expr, list, indent),
             }
         } else {
@@ -701,12 +701,20 @@ impl<'a> Aggregator<'a> {
         self.render_doc(&Doc::concat(parts), indent)
     }
 
-    fn format_map(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
-        let func_type = self.display_pse(exprs.first().unwrap(), &Indent::empty());
+    fn format_map(
+        &mut self,
+        expr: &'a PreSymbolicExpression,
+        exprs: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> String {
+        let [keyword, name, rest @ ..] = exprs else {
+            return self.preserve_expr(expr, indent);
+        };
+        let func_type = self.display_pse(keyword, &Indent::empty());
         let nested = indent.indented(&self.indentation_str);
-        let name = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
+        let name = self.format_source_exprs(slice::from_ref(name), indent);
 
-        let body = self.lines_doc(&exprs[2..], &nested, false);
+        let body = self.lines_doc(rest, &nested, false);
         let open = Doc::concat(vec![
             Doc::text(format!("({func_type} ")),
             Doc::verbatim(name),
@@ -785,34 +793,39 @@ impl<'a> Aggregator<'a> {
         )
     }
 
-    fn format_let(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_let(
+        &mut self,
+        expr: &'a PreSymbolicExpression,
+        exprs: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> String {
+        let [_, bindings, body @ ..] = exprs else {
+            return self.preserve_expr(expr, indent);
+        };
+        let Some(bindings) = bindings.match_list() else {
+            return self.preserve_expr(expr, indent);
+        };
         let nested = indent.indented(&self.indentation_str);
-        let mut parts: Vec<Doc> = vec![Doc::text("(let (")];
-
-        if let Some(args) = exprs[1].match_list() {
-            if args.len() == 1 {
-                parts.push(Doc::verbatim(
-                    self.format_source_exprs(slice::from_ref(&args[0]), &nested),
-                ));
-                parts.push(Doc::text(")"));
-            } else {
-                let double_indent = nested.indented(&self.indentation_str);
-                let binding_parts = self.lines_doc(args, &double_indent, false);
-                // Double-indent for bindings, close paren at single-indent
-                parts.push(Doc::indent(Doc::concat(vec![
-                    Doc::indent(Doc::concat(binding_parts)),
-                    Doc::Hardline,
-                    Doc::text(")"),
-                ])));
-            }
-        }
-
-        parts.push(self.body_doc(exprs.get(2..).unwrap_or_default(), &nested));
-        parts.push(Doc::Hardline);
-        parts.push(Doc::text(")"));
-
-        let doc = Doc::concat(parts);
+        let bindings = if let [binding] = bindings {
+            let binding = self.format_source_exprs(slice::from_ref(binding), &nested);
+            Doc::verbatim(format!("({binding})"))
+        } else {
+            self.multiline_list_doc(bindings, &nested)
+        };
+        let doc = Doc::concat(vec![
+            Doc::text("(let "),
+            bindings,
+            self.body_doc(body, &nested),
+            Doc::Hardline,
+            Doc::text(")"),
+        ]);
         self.render_doc(&doc, indent)
+    }
+
+    fn multiline_list_doc(&mut self, items: &'a [PreSymbolicExpression], indent: &Indent) -> Doc {
+        let nested = indent.indented(&self.indentation_str);
+        let lines = self.lines_doc(items, &nested, false);
+        Doc::indent(block(Doc::text("("), lines, ")"))
     }
 
     /// Body expressions one per line at `indent`, keeping at most one blank
@@ -890,21 +903,29 @@ impl<'a> Aggregator<'a> {
 
     // * match *
     // always multiple lines
-    fn format_match(&mut self, exprs: &'a [PreSymbolicExpression], indent: &Indent) -> String {
+    fn format_match(
+        &mut self,
+        expr: &'a PreSymbolicExpression,
+        exprs: &'a [PreSymbolicExpression],
+        indent: &Indent,
+    ) -> String {
+        let [_, value, branches @ ..] = exprs else {
+            return self.preserve_expr(expr, indent);
+        };
         let nested = indent.indented(&self.indentation_str);
 
         // value to match on
-        let match_value = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
+        let match_value = self.format_source_exprs(slice::from_ref(value), indent);
 
         // With comments, each branch part goes on its own line
         if contains_comments(exprs) {
-            let branch_parts = self.lines_doc(&exprs[2..], &nested, false);
+            let branch_parts = self.lines_doc(branches, &nested, false);
             let open = Doc::concat(vec![Doc::text("(match "), Doc::verbatim(match_value)]);
             return self.render_doc(&block(open, branch_parts, ")"), indent);
         }
 
         let mut branch_parts: Vec<Doc> = Vec::new();
-        let mut iter = exprs[2..].iter().peekable();
+        let mut iter = branches.iter().peekable();
         while let Some(branch) = iter.next() {
             let trailing = get_trailing_comment(branch, &mut iter);
             self.check_and_cache_ignored(branch, iter.peek().copied());
@@ -980,40 +1001,33 @@ impl<'a> Aggregator<'a> {
 
     fn format_restrict_assets(
         &mut self,
+        expr: &'a PreSymbolicExpression,
         exprs: &'a [PreSymbolicExpression],
         indent: &Indent,
     ) -> String {
+        let [_, owner, allowances_list, body @ ..] = exprs else {
+            return self.preserve_expr(expr, indent);
+        };
+        let Some(allowances) = allowances_list.match_list() else {
+            return self.preserve_expr(expr, indent);
+        };
         let nested = indent.indented(&self.indentation_str);
-        let owner = self.format_source_exprs(slice::from_ref(&exprs[1]), indent);
+        let owner = self.format_source_exprs(slice::from_ref(owner), indent);
 
-        let mut parts: Vec<Doc> = vec![Doc::text("(restrict-assets? "), Doc::verbatim(owner)];
-
-        // allowances
-        if let Some(allowances_list) = exprs.get(2) {
-            if let Some(allowances) = allowances_list.match_list() {
-                if allowances.len() == 1 {
-                    parts.push(Doc::text(" "));
-                    parts.push(Doc::verbatim(
-                        self.format_source_exprs(slice::from_ref(allowances_list), indent),
-                    ));
-                } else {
-                    let double_indent = nested.indented(&self.indentation_str);
-                    let allowance_parts = self.lines_doc(allowances, &double_indent, false);
-                    parts.push(Doc::text(" ("));
-                    parts.push(Doc::indent(Doc::concat(vec![
-                        Doc::indent(Doc::concat(allowance_parts)),
-                        Doc::Hardline,
-                        Doc::text(")"),
-                    ])));
-                }
-            }
-        }
-
-        parts.push(self.body_doc(exprs.get(3..).unwrap_or_default(), &nested));
-        parts.push(Doc::Hardline);
-        parts.push(Doc::text(")"));
-
-        let doc = Doc::concat(parts);
+        let allowances = if allowances.len() == 1 {
+            Doc::verbatim(self.format_source_exprs(slice::from_ref(allowances_list), indent))
+        } else {
+            self.multiline_list_doc(allowances, &nested)
+        };
+        let doc = Doc::concat(vec![
+            Doc::text("(restrict-assets? "),
+            Doc::verbatim(owner),
+            Doc::text(" "),
+            allowances,
+            self.body_doc(body, &nested),
+            Doc::Hardline,
+            Doc::text(")"),
+        ]);
         self.render_doc(&doc, indent)
     }
 
@@ -1386,13 +1400,13 @@ impl<'a> Aggregator<'a> {
                             literal.push('"');
                             literal
                         }
-                        clarity::vm::types::CharType::UTF8(_) => {
+                        clarity::vm::types::CharType::UTF8(utf8_data) => {
                             // utf8 strings use the original source to preserve formatting
                             self.source_lines
                                 .as_ref()
                                 .map(|source_lines| source_lines.extract_expr_source(pse))
                                 .filter(|extracted| !extracted.is_empty())
-                                .unwrap_or_else(|| value.to_string())
+                                .unwrap_or_else(|| utf8_literal(&utf8_data.data))
                         }
                     }
                 }
@@ -1720,6 +1734,22 @@ fn push_spaces(acc: &mut String, count: u32) {
     for _ in 0..count {
         acc.push(' ');
     }
+}
+
+fn utf8_literal(codepoints: &[Vec<u8>]) -> String {
+    let mut literal = String::from("u\"");
+    for bytes in codepoints {
+        for ch in String::from_utf8_lossy(bytes).chars() {
+            // Clarity rejects the escaped apostrophe produced by escape_default.
+            if ch == '\'' {
+                literal.push(ch);
+            } else {
+                literal.extend(ch.escape_default());
+            }
+        }
+    }
+    literal.push('"');
+    literal
 }
 
 fn comment_piece(text: &str, pse: &PreSymbolicExpression) -> String {
