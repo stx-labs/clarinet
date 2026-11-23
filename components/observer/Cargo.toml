@@ -5,7 +5,6 @@ edition = "2021"
 
 [dependencies]
 axum = { version = "0.8.6", features = ["json"] }
-base58 = { workspace = true }
 base64 = { workspace = true }
 bitcoincore-rpc = { workspace = true }
 bitcoincore-rpc-json = { workspace = true }
@@ -28,6 +27,7 @@ default = []
 stacks-signers = ["dep:libsigner"]
 
 [dev-dependencies]
+bs58 = { workspace = true }
 mockito = { workspace = true }
 test-case = { workspace = true }
 

@@ -1,6 +1,5 @@
 use std::collections::HashSet;
 
-use base58::FromBase58;
 use bitcoincore_rpc::bitcoin::blockdata::opcodes;
 use bitcoincore_rpc::bitcoin::blockdata::script::Builder as BitcoinScriptBuilder;
 
@@ -81,8 +80,8 @@ pub fn generate_test_tx_bitcoin_p2pkh_transfer(
     hash.append(&mut txid.to_be_bytes().to_vec());
 
     // Preparing metadata
-    let pubkey_hash = recipient
-        .from_base58()
+    let pubkey_hash = bs58::decode(recipient)
+        .into_vec()
         .expect("Unable to get bytes from btc address");
     let slice = [
         pubkey_hash[1],

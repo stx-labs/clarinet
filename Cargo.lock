@@ -289,12 +289,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd307490d624467aa6f74b0eabb77633d1f758a7b25f12bceb0b22e08d9726f6"
 
 [[package]]
-name = "base58"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6107fe1be6682a68940da878d9e9f5e90ca5745b3dec9fd1bb393c8777d4f581"
-
-[[package]]
 name = "base64"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -736,10 +730,10 @@ dependencies = [
 name = "clarinet-deployments"
 version = "4.0.0"
 dependencies = [
- "base58",
  "bitcoin",
  "bitcoincore-rpc",
  "bitcoincore-rpc-json",
+ "bs58",
  "clarinet-defaults",
  "clarinet-files",
  "clarinet-utils",
@@ -3028,10 +3022,10 @@ name = "observer"
 version = "4.0.0"
 dependencies = [
  "axum",
- "base58",
  "base64 0.22.1",
  "bitcoincore-rpc",
  "bitcoincore-rpc-json",
+ "bs58",
  "clarity",
  "crossbeam-channel",
  "hex",
@@ -4565,9 +4559,9 @@ dependencies = [
 name = "stacks-network"
 version = "4.0.0"
 dependencies = [
- "base58",
  "bitcoincore-rpc",
  "bollard",
+ "bs58",
  "chrono",
  "clarinet-deployments",
  "clarinet-files",

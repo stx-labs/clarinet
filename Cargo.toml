@@ -43,7 +43,6 @@ clarinet-defaults = { path = "components/clarinet-defaults" }
 # External crates
 aes-gcm = { version = "0.11.1", default-features = false }
 argon2 = { version = "0.6.0", default-features = false }
-base58 = "0.2.0"
 base64 = "0.22.1"
 bip32 = "0.6.0"
 bip39 = "3.0.0"
