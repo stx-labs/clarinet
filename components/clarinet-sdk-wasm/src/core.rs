@@ -580,7 +580,10 @@ impl SDK {
 
         let mut settings = SessionSettings::default();
         settings.repl_settings.remote_data = config.unwrap_or_default();
-        let session = Session::new(settings);
+        let mut session = Session::new(settings);
+        if self.options.track_coverage {
+            session.enable_coverage_hook();
+        }
 
         self.session = Some(session);
         Ok(())
@@ -826,7 +829,9 @@ impl SDK {
         let deployment_file = deployment_plan.to_file_content(project_root)?;
 
         if let Some(existing_file) = existing_file {
-            if existing_file.as_bytes() == deployment_file {
+            if existing_file.as_bytes() == deployment_file
+                || deployment_plan.matches_file_content(existing_file, project_root)
+            {
                 return Ok(());
             }
         }

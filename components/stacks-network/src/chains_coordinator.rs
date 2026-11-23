@@ -9,6 +9,7 @@ use std::{fs, str};
 
 use base58::FromBase58;
 use bitcoincore_rpc::bitcoin::Address;
+use bollard::Docker;
 use clarinet_deployments::onchain::{
     apply_on_chain_deployment, is_contract_published, DeploymentCommand, DeploymentEvent,
     TransactionStatus,
@@ -48,11 +49,11 @@ use stackslib::util_lib::signed_structured_data::pox5::make_pox_5_signer_grant_s
 use tokio::sync::mpsc::UnboundedSender;
 
 use super::ChainsCoordinatorCommand;
-use crate::command::run_docker_command;
+use crate::docker_files::{copy_file_from_container, exec_in_container};
 use crate::event::{send_status_update, DevnetEvent, Status};
 use crate::orchestrator::{
     copy_directory, get_global_snapshot_dir, get_project_snapshot_dir, ServicesMapHosts,
-    DEVNET_SNAPSHOT_READY_MARKER, EXCLUDED_STACKS_SNAPSHOT_FILES,
+    DEVNET_SNAPSHOT_READY_MARKER, EXCLUDED_STACKS_SNAPSHOT_FILES, STACKS_API_EVENTS_FILE,
 };
 use crate::snapshot_extractor::SnapshotImages;
 
@@ -79,6 +80,8 @@ pub struct DevnetEventObserverConfig {
     pub deployment_fee_rate: u64,
     pub services_map_hosts: ServicesMapHosts,
     pub network_manifest: NetworkManifest,
+    pub docker_client: Docker,
+    pub stacks_api_container_name: String,
 }
 
 impl DevnetEventObserverConfig {
@@ -121,6 +124,8 @@ impl DevnetEventObserverConfig {
         deployment: DeploymentSpecification,
         ctx: &Context,
         services_map_hosts: ServicesMapHosts,
+        docker_client: Docker,
+        stacks_api_container_name: String,
     ) -> Self {
         ctx.try_log(|logger| slog::info!(logger, "Checking contracts"));
         let event_observer_config = EventObserverConfig {
@@ -152,6 +157,8 @@ impl DevnetEventObserverConfig {
             deployment_fee_rate: network_manifest.network.deployment_fee_rate,
             services_map_hosts,
             network_manifest,
+            docker_client,
+            stacks_api_container_name,
         }
     }
 }
@@ -647,12 +654,7 @@ fn should_publish_stacking_orders(
     }
 
     let offset = (current_cycle + duration).saturating_sub(*start_at_cycle);
-    let should_stack = (offset % duration) == (duration - 1);
-    if !should_stack {
-        return false;
-    }
-
-    true
+    (offset % duration) == (duration - 1)
 }
 
 fn remove_global_snapshot(
@@ -1587,49 +1589,40 @@ async fn export_stacks_api_events(
     global_snapshot_dir: &Path,
     devnet_event_tx: &Sender<DevnetEvent>,
 ) -> Result<(), String> {
-    // Get container name
-    let container_name = format!("stacks-api.{}.devnet", config.manifest.project.name);
+    let container_name = &config.stacks_api_container_name;
 
     let _ = devnet_event_tx.send(DevnetEvent::info(
         "Exporting Stacks API events...".to_string(),
     ));
 
-    // Create exec command to export events
-    let export_command = format!(
-        "docker exec {container_name} node /app/lib/index.js export-events --file /tmp/events_cache.tsv --overwrite-file"
-    );
-    let docker_host = config.devnet_config.docker_host.as_deref();
-    let output = run_docker_command(&export_command, docker_host)
-        .map_err(|e| format!("Failed to execute export command: {e}"))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "Export command failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
-
-    // Wait for export to complete
-    std::thread::sleep(Duration::from_secs(5));
+    let docker = &config.docker_client;
+    exec_in_container(
+        docker,
+        container_name,
+        &[
+            "node",
+            "/app/lib/index.js",
+            "export-events",
+            "--file",
+            STACKS_API_EVENTS_FILE,
+            "--overwrite-file",
+        ],
+    )
+    .await
+    .map_err(|e| format!("Export command failed: {e}"))?;
 
     let export_path = global_snapshot_dir.join("events_export");
     fs::create_dir_all(&export_path)
         .map_err(|e| format!("unable to create events export directory: {e:?}"))?;
 
-    let copy_command = format!(
-        "docker cp {container_name}:/tmp/events_cache.tsv {}",
-        export_path.join("events_cache.tsv").display()
-    );
-
-    let output = run_docker_command(&copy_command, docker_host)
-        .map_err(|e| format!("Failed to copy events file: {e}"))?;
-
-    if !output.status.success() {
-        return Err(format!(
-            "Copy command failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        ));
-    }
+    copy_file_from_container(
+        docker,
+        container_name,
+        STACKS_API_EVENTS_FILE,
+        &export_path.join("events_cache.tsv"),
+    )
+    .await
+    .map_err(|e| format!("Failed to copy events file: {e}"))?;
 
     let _ = devnet_event_tx.send(DevnetEvent::success(
         "Successfully exported Stacks API events".to_string(),
@@ -1704,7 +1697,6 @@ mod test_rpc_client {
         AccountConfig {
             label: "deployer".to_string(),
             mnemonic: "cycle puppy glare enroll cost improve round trend wrist mushroom scorpion tower claim oppose clever elephant dinosaur eight problem before frozen dune wagon high".to_string(),
-            encrypted_mnemonic: "".to_string(),
             derivation: DEFAULT_DERIVATION_PATH.to_string(),
             balance: 10000000,
             sbtc_balance: 100000000,
@@ -1716,7 +1708,7 @@ mod test_rpc_client {
 
     fn test_services_map_hosts(mock_url: &str) -> ServicesMapHosts {
         ServicesMapHosts {
-            stacks_api_host: mock_url.replace("http://", ""),
+            stacks_api_host: mock_url.trim_prefix("http://").to_string(),
             // only stacks_node is called
             stacks_node_host: mock_url.to_string(),
             bitcoin_node_host: "localhost".to_string(),

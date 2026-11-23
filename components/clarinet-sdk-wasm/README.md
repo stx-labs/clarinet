@@ -19,7 +19,9 @@ pnpm run build:sdk-wasm
 ```
 
 Alternatively, it's also possible to build the packages separately. It should only be done for
-development purpose.
+development purpose: these commands skip the release settings that `build.mjs` adds (the Cargo
+profile in `release-profile.toml` and Wasm SIMD), so the output is larger and slower than the
+published packages.
 
 **Build for node**
 

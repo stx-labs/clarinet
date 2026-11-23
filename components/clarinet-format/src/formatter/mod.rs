@@ -6,11 +6,13 @@ mod sequence;
 use std::collections::HashMap;
 use std::iter::Peekable;
 use std::ops::Deref;
-use std::{fmt, slice};
+use std::{fmt, iter, slice, vec};
 
 use clarinet_defaults::DEFAULT_EPOCH;
 use clarity::types::StacksEpochId;
+use clarity::vm::ast::parser;
 use clarity::vm::ast::stack_depth_checker::StackDepthLimits;
+use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::representations::{PreSymbolicExpression, PreSymbolicExpressionType, Span};
@@ -114,18 +116,38 @@ impl ClarityFormatter {
         Self { settings }
     }
     /// formatting for files to ensure a newline at the end
-    pub fn format_file(&self, source: &str, epoch: Option<StacksEpochId>) -> String {
+    ///
+    /// Returns the parse error for a source that doesn't parse, such as a
+    /// contract with an unclosed list or a non-ASCII character.
+    pub fn format_file(
+        &self,
+        source: &str,
+        epoch: Option<StacksEpochId>,
+    ) -> Result<String, ParseFailure> {
         let trimmed_source = source.trim_start_matches(['\n', '\r']);
-        let pse = clarity::vm::ast::parser::v2::parse(
-            trimmed_source,
-            StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH)),
-        )
-        .unwrap();
+        let pse = parse(trimmed_source, epoch).map_err(|mut failure| {
+            let prefix = &source[..source.len() - trimmed_source.len()];
+            let trimmed_lines = prefix.matches('\n').count() as u32;
+            // Bare carriage returns after the last newline occupy columns on the first parsed line.
+            let trimmed_columns = prefix.bytes().rev().take_while(|&b| b == b'\r').count() as u32;
+            let diagnostics = iter::once(&mut failure.error).chain(&mut failure.notes);
+            for span in diagnostics.flat_map(|diagnostic| &mut diagnostic.spans) {
+                if span.start_line == 1 {
+                    span.start_column += trimmed_columns;
+                }
+                if span.end_line == 1 {
+                    span.end_column += trimmed_columns;
+                }
+                span.start_line += trimmed_lines;
+                span.end_line += trimmed_lines;
+            }
+            failure
+        })?;
         let mut agg = Aggregator::new(&self.settings, &pse, Some(trimmed_source));
         let result = agg.generate();
 
         // make sure the file ends with a newline
-        format!("{}\n", result.trim_end_matches(['\n', '\r']))
+        Ok(format!("{}\n", result.trim_end_matches(['\n', '\r'])))
     }
     /// formatting an AST without a source file
     pub fn format_ast(&self, pse: &[PreSymbolicExpression]) -> String {
@@ -133,7 +155,11 @@ impl ClarityFormatter {
         agg.generate()
     }
     /// Alias `format_file` to `format`
-    pub fn format(&self, source: &str, epoch: Option<StacksEpochId>) -> String {
+    pub fn format(
+        &self,
+        source: &str,
+        epoch: Option<StacksEpochId>,
+    ) -> Result<String, ParseFailure> {
         self.format_file(source, epoch)
     }
     /// for range formatting within editors
@@ -141,12 +167,8 @@ impl ClarityFormatter {
         &self,
         source: &str,
         epoch: Option<StacksEpochId>,
-    ) -> Result<String, String> {
-        let pse = clarity::vm::ast::parser::v2::parse(
-            source,
-            StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH)),
-        )
-        .map_err(|e| e.to_string())?;
+    ) -> Result<String, ParseFailure> {
+        let pse = parse(source, epoch)?;
 
         // range formatting specifies to the aggregator that we're
         // starting mid-source and thus should pre-populate
@@ -161,6 +183,44 @@ impl ClarityFormatter {
         } else {
             format!("{leading_spaces}{result}")
         })
+    }
+}
+
+/// Why a source couldn't be parsed: the first error, and the notes after it,
+/// such as where the `(` an `expected closing ')'` error needs to match is.
+#[derive(Debug)]
+pub struct ParseFailure {
+    pub error: Diagnostic,
+    pub notes: Vec<Diagnostic>,
+}
+
+impl IntoIterator for ParseFailure {
+    type Item = Diagnostic;
+    type IntoIter = iter::Chain<iter::Once<Diagnostic>, vec::IntoIter<Diagnostic>>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        iter::once(self.error).chain(self.notes)
+    }
+}
+
+/// Parses `source`, rejecting it at the first diagnostic of any level, as a
+/// node's fail-fast parser does. Collecting diagnostics keeps the error's
+/// position, which the fail-fast parser drops.
+fn parse(
+    source: &str,
+    epoch: Option<StacksEpochId>,
+) -> Result<Vec<PreSymbolicExpression>, ParseFailure> {
+    let depth_limits = StackDepthLimits::for_epoch(epoch.unwrap_or(DEFAULT_EPOCH));
+    let (pse, diagnostics, _) = parser::v2::parse_collect_diagnostics(source, depth_limits);
+    let mut diagnostics = diagnostics.into_iter();
+    match diagnostics.next() {
+        Some(error) => Err(ParseFailure {
+            error,
+            notes: diagnostics
+                .take_while(|diagnostic| diagnostic.level == Level::Note)
+                .collect(),
+        }),
+        None => Ok(pse),
     }
 }
 
@@ -372,7 +432,7 @@ impl<'a> Aggregator<'a> {
 
             if let Some(comment) = trailing_comment {
                 // A define ends with a newline, and the comment goes before it
-                result.push_str(formatted.strip_suffix('\n').unwrap_or(&formatted));
+                result.push_str(formatted.trim_suffix('\n'));
                 result.push(' ');
                 result.push_str(&self.display_pse(comment, indent));
                 result.push('\n');
@@ -988,7 +1048,10 @@ impl<'a> Aggregator<'a> {
         let mut estimated_len = prefix_len;
         let empty = Indent::empty();
         for item in &exprs[start_index..] {
-            let display = self.display_pse(item, &empty);
+            // Measured as format_list prints it: `(tuple ...)` counted as a
+            // plain list but prints as the shorter `{ ... }`, so a second run
+            // over the sugar laid the list out differently.
+            let display = self.format_source_exprs(slice::from_ref(item), &empty);
             estimated_len += display.len() + 1; // display + space
         }
         estimated_len + 1 // closing paren
@@ -1757,7 +1820,7 @@ mod tests_formatter {
             assert!(!expected_values.is_empty());
 
             for (mode, formatted) in [
-                ("file", formatter.format_file(&source, None)),
+                ("file", formatter.format_file(&source, None).unwrap()),
                 ("section", formatter.format_section(&source, None).unwrap()),
                 ("ast", formatter.format_ast(&original)),
             ] {
@@ -1766,13 +1829,56 @@ mod tests_formatter {
                 });
                 assert_eq!(values(&reparsed), expected_values, "{mode}: {source}");
                 let reformatted = match mode {
-                    "file" => formatter.format_file(&formatted, None),
+                    "file" => formatter.format_file(&formatted, None).unwrap(),
                     "section" => formatter.format_section(&formatted, None).unwrap(),
                     _ => formatter.format_ast(&reparsed),
                 };
                 assert_eq!(reformatted, formatted, "{mode}: {source}");
             }
         }
+    }
+
+    #[test]
+    fn test_format_file_reports_parse_errors() {
+        let formatter = ClarityFormatter::new(Settings::default());
+        // Unclosed, and a non-ASCII character the lexer rejects in every epoch
+        for src in ["(define-constant a u1", ";; café\n(define-constant a u1)"] {
+            assert!(formatter.format_file(src, None).is_err(), "{src}");
+            assert!(formatter.format_section(src, None).is_err(), "{src}");
+        }
+    }
+
+    #[test]
+    fn test_format_file_reports_parse_error_notes() {
+        let formatter = ClarityFormatter::new(Settings::default());
+        // The leading newline is trimmed before parsing, but positions match the file
+        let failure = formatter
+            .format_file("\n(define-constant a u1", None)
+            .unwrap_err();
+        assert_eq!(failure.error.message, "expected closing ')'");
+        assert_eq!(failure.error.spans[0].start_line, 2);
+        let [note] = failure.notes.as_slice() else {
+            panic!("expected one note: {:?}", failure.notes);
+        };
+        assert_eq!(note.message, "to match this '('");
+        assert_eq!(note.spans[0].start_line, 2);
+        assert_eq!(note.spans[0].start_column, 1);
+    }
+
+    #[test]
+    fn test_format_file_restores_columns_after_leading_carriage_returns() {
+        let formatter = ClarityFormatter::new(Settings::default());
+        let failure = formatter.format_file("\r\n\r\r(ok\n u1", None).unwrap_err();
+        let opening = &failure.notes[0].spans[0];
+        assert_eq!(
+            (opening.start_line, opening.start_column, opening.end_column),
+            (2, 3, 3)
+        );
+        let closing = &failure.error.spans[0];
+        assert_eq!(
+            (closing.start_line, closing.start_column, closing.end_column),
+            (3, 4, 4)
+        );
     }
 
     #[test]
@@ -2859,11 +2965,11 @@ mod tests_formatter {
     /// Formats `src` as a file and checks the output parses and is stable.
     fn format_valid_and_stable(src: &str) -> String {
         let formatter = ClarityFormatter::new(Settings::default());
-        let result = formatter.format_file(src, None);
+        let result = formatter.format_file(src, None).unwrap();
         clarity::vm::ast::parser::v2::parse(&result, StackDepthLimits::for_epoch(DEFAULT_EPOCH))
             .unwrap_or_else(|e| panic!("invalid output for {src:?}:\n{result}\n{e}"));
         assert_eq!(
-            formatter.format_file(&result, None),
+            formatter.format_file(&result, None).unwrap(),
             result,
             "not idempotent"
         );
@@ -2946,6 +3052,13 @@ mod tests_formatter {
             (
                 "(define-constant X (tuple (a u1)))",
                 "(define-constant X { a: u1 })",
+            ),
+            // Long enough that the constructor's own spelling would overflow
+            // the line where the sugar fits, so the list must be measured as
+            // it prints.
+            (
+                "(define-read-only (f)\n  (begin\n    (list (tuple (a x) ;; TODO: x\n      (b none)) (let ((a x) (b none)) true))\n    u1))",
+                "(define-read-only (f)\n  (begin\n    (list { a: x, ;; TODO: x\n      b: none } (let ((a x) (b none)) true))\n    u1))",
             ),
         ] {
             assert_eq!(

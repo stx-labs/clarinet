@@ -1,2 +1,28 @@
 type-complexity-threshold = 1000
 too-many-arguments-threshold = 12
+
+# serde-saphyr has no global options, so YAML must be read through the one helper that sets them.
+disallowed-methods = [
+  { path = "serde_saphyr::from_bytes_multiple", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_bytes_multiple_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_multiple", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_multiple_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_reader", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_reader_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_slice", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_slice_multiple", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_slice_multiple_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_slice_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_str", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_str_multiple", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_str_multiple_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::from_str_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::read", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::read_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::with_deserializer_from_reader", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::with_deserializer_from_reader_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::with_deserializer_from_slice", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::with_deserializer_from_slice_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::with_deserializer_from_str", reason = "use clarinet_deployments::yaml::from_yaml" },
+  { path = "serde_saphyr::with_deserializer_from_str_with_options", reason = "use clarinet_deployments::yaml::from_yaml" },
+]

@@ -16,7 +16,8 @@ use clarity_repl::repl::{clarity_version_from_u8, clarity_version_to_u8, Session
 use clarity_repl::utils::{remove_env_simnet, Environment};
 use serde::{Deserialize, Serialize};
 use strum::{EnumIter, IntoEnumIterator};
-use yaml_serde;
+
+use crate::yaml::{from_yaml, to_yaml};
 
 #[derive(Serialize, Deserialize, PartialEq, Debug, Clone, Copy, Eq, PartialOrd, Ord, EnumIter)]
 pub enum EpochSpec {
@@ -284,83 +285,66 @@ pub enum TransactionSpecificationFile {
     StxTransfer(StxTransferSpecificationFile),
 }
 
-fn deserialize_variant(
+fn deserialize_variant<E: serde::de::Error>(
     variant: &str,
-    value: yaml_serde::Value,
-) -> Result<TransactionSpecificationFile, String> {
+    value: serde_json::Value,
+) -> Result<TransactionSpecificationFile, E> {
+    use TransactionSpecificationFile as Tx;
+
     match variant {
-        "contract-call" => ContractCallSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::ContractCall)
-            .map_err(|e| e.to_string()),
-        "contract-publish" => ContractPublishSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::ContractPublish)
-            .map_err(|e| e.to_string()),
-        "emulated-contract-call" => EmulatedContractCallSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::EmulatedContractCall)
-            .map_err(|e| e.to_string()),
-        "emulated-contract-publish" => EmulatedContractPublishSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::EmulatedContractPublish)
-            .map_err(|e| e.to_string()),
-        "requirement-publish" => RequirementPublishSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::RequirementPublish)
-            .map_err(|e| e.to_string()),
-        "btc-transfer" => BtcTransferSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::BtcTransfer)
-            .map_err(|e| e.to_string()),
-        "stx-transfer" => StxTransferSpecificationFile::deserialize(value)
-            .map(TransactionSpecificationFile::StxTransfer)
-            .map_err(|e| e.to_string()),
-        other => Err(format!("unknown transaction type: {other}")),
+        "contract-call" => serde_json::from_value(value).map(Tx::ContractCall),
+        "contract-publish" => serde_json::from_value(value).map(Tx::ContractPublish),
+        "emulated-contract-call" => serde_json::from_value(value).map(Tx::EmulatedContractCall),
+        "emulated-contract-publish" => {
+            serde_json::from_value(value).map(Tx::EmulatedContractPublish)
+        }
+        "requirement-publish" => serde_json::from_value(value).map(Tx::RequirementPublish),
+        "btc-transfer" => serde_json::from_value(value).map(Tx::BtcTransfer),
+        "stx-transfer" => serde_json::from_value(value).map(Tx::StxTransfer),
+        other => return Err(E::custom(format!("unknown transaction type: {other}"))),
     }
+    .map_err(E::custom)
 }
 
-// Custom Deserialize for backward compatibility: supports:
-// - the new internally-tagged format (`transaction-type: variant-name`)
-// - the old serde_yaml externally-tagged format (`variant-name: { fields }`) (Clarinet <= 3.13.1)
-// - and yaml_serde's native `!tag` format.
+/// A hand-written `parameters:` key with no value is an empty list.
+fn null_as_empty<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::deserialize(deserializer).map(Option::unwrap_or_default)
+}
+
+// Accept current transaction-type mappings, legacy single-key mappings, and YAML !tags.
 impl<'de> Deserialize<'de> for TransactionSpecificationFile {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: serde::Deserializer<'de>,
     {
-        let value = yaml_serde::Value::deserialize(deserializer)?;
+        // Transaction fields use JSON-compatible values; capture YAML tags separately.
+        let serde_saphyr::Tagged(value, tag) =
+            serde_saphyr::Tagged::<serde_json::Value>::deserialize(deserializer)?;
 
-        match value {
-            yaml_serde::Value::Mapping(ref map) => {
-                let type_key = yaml_serde::Value::String("transaction-type".into());
-                if let Some(yaml_serde::Value::String(ref variant)) = map.get(&type_key) {
-                    // New internally-tagged format: { transaction-type: variant, ...fields }
-                    let variant = variant.clone();
-                    let mut remaining = map.clone();
-                    remaining.remove(&type_key);
-                    deserialize_variant(&variant, yaml_serde::Value::Mapping(remaining))
-                        .map_err(serde::de::Error::custom)
-                } else if map.len() == 1 {
-                    // Old externally-tagged format: { variant-name: { ...fields } }
-                    let (key, inner) = map.iter().next().unwrap();
-                    if let yaml_serde::Value::String(ref variant) = key {
-                        deserialize_variant(variant, inner.clone())
-                            .map_err(serde::de::Error::custom)
-                    } else {
-                        Err(serde::de::Error::custom(
-                            "expected string key for transaction variant",
-                        ))
-                    }
-                } else {
-                    Err(serde::de::Error::custom(
-                        "expected mapping with 'transaction-type' key or single-key variant map",
-                    ))
-                }
-            }
-            yaml_serde::Value::Tagged(ref tagged) => {
-                // yaml_serde tag format: !variant-name { ... }
-                let tag_str = tagged.tag.to_string();
-                let variant = tag_str.strip_prefix('!').unwrap_or(&tag_str);
-                deserialize_variant(variant, tagged.value.clone()).map_err(serde::de::Error::custom)
-            }
-            _ => Err(serde::de::Error::custom(
+        if let Some(tag) = tag.filter(|tag| tag != "tag:yaml.org,2002:map" && tag != "!") {
+            return deserialize_variant(tag.trim_prefix('!'), value);
+        }
+
+        let serde_json::Value::Object(mut map) = value else {
+            return Err(serde::de::Error::custom(
                 "expected mapping or tagged value for transaction specification",
-            )),
+            ));
+        };
+
+        if let Some(serde_json::Value::String(variant)) = map.get("transaction-type") {
+            let variant = variant.clone();
+            map.remove("transaction-type");
+            deserialize_variant(&variant, serde_json::Value::Object(map))
+        } else if map.len() == 1 {
+            let (variant, fields) = map.into_iter().next().unwrap();
+            deserialize_variant(&variant, fields)
+        } else {
+            Err(serde::de::Error::custom(
+                "expected mapping with 'transaction-type' key or single-key variant map",
+            ))
         }
     }
 }
@@ -393,6 +377,7 @@ pub struct ContractCallSpecificationFile {
     pub contract_id: String,
     pub expected_sender: String,
     pub method: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub parameters: Vec<String>,
     pub cost: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -430,6 +415,7 @@ pub struct EmulatedContractCallSpecificationFile {
     pub contract_id: String,
     pub emulated_sender: String,
     pub method: String,
+    #[serde(deserialize_with = "null_as_empty")]
     pub parameters: Vec<String>,
 }
 
@@ -997,9 +983,8 @@ impl DeploymentSpecification {
     ) -> Result<DeploymentSpecification, String> {
         let spec_file_content = paths::read_content(deployment_path)?;
 
-        let specification_file: DeploymentSpecificationFile =
-            yaml_serde::from_slice(&spec_file_content[..])
-                .map_err(|msg| format!("unable to read file {msg}"))?;
+        let specification_file =
+            DeploymentSpecificationFile::from_file_content(&spec_file_content)?;
 
         let network = match specification_file.network.to_lowercase().as_str() {
             "simnet" => StacksNetwork::Simnet,
@@ -1200,9 +1185,20 @@ impl DeploymentSpecification {
     }
 
     pub fn to_file_content(&self, project_root: &Path) -> Result<Vec<u8>, String> {
-        yaml_serde::to_string(&self.to_specification_file(project_root))
+        to_yaml(&self.to_specification_file(project_root))
             .map(|s| s.into_bytes())
             .map_err(|err| format!("failed to serialize deployment\n{err}"))
+    }
+
+    /// Whether `file_content` already describes this deployment. Only the content
+    /// counts, so a plan written with another YAML style is not reported as changed.
+    pub fn matches_file_content(
+        &self,
+        file_content: impl AsRef<[u8]>,
+        project_root: &Path,
+    ) -> bool {
+        DeploymentSpecificationFile::from_file_content(file_content)
+            .is_ok_and(|on_disk| on_disk == self.to_specification_file(project_root))
     }
 
     pub fn sort_batches_by_epoch(&mut self) {
@@ -1317,12 +1313,12 @@ impl DeploymentSpecificationFile {
             .read_file(path.to_string_lossy().into_owned())
             .await?;
 
-        yaml_serde::from_str(&spec_file_content).map_err(|msg| format!("unable to read file {msg}"))
+        Self::from_file_content(&spec_file_content)
     }
     pub fn from_file_content(
-        spec_file_content: &str,
+        spec_file_content: impl AsRef<[u8]>,
     ) -> Result<DeploymentSpecificationFile, String> {
-        yaml_serde::from_str(spec_file_content).map_err(|msg| format!("unable to read file {msg}"))
+        from_yaml(spec_file_content).map_err(|msg| format!("unable to read file {msg}"))
     }
 }
 

@@ -6,17 +6,13 @@ license = "MIT"
 edition = "2021"
 
 [dependencies]
-aes-gcm.workspace = true
-argon2.workspace = true
-bip39 = "2.2.0"
-bip32 = "0.5.3"
+aes-gcm = { workspace = true, features = ["aes", "alloc"] }
+argon2 = { workspace = true, features = ["alloc"] }
+bip32 = { workspace = true, features = ["alloc"] }
+bip39.workspace = true
 bs58.workspace = true
-libsecp256k1.workspace = true
 rand.workspace = true
-
-[lib]
-name = "clarinet_utils"
-path = "src/lib.rs"
+strum = { workspace = true, features = ["derive"] }
 
 [dev-dependencies]
 divan = { workspace = true }

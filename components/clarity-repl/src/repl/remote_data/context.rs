@@ -56,7 +56,7 @@ pub fn set_functions_in_contract_context(
                         &context_name,
                         &mut ct,
                     )?;
-                    contract_context.functions.insert(name.clone(), func);
+                    contract_context.functions.insert(name, func);
                 }
                 DefineFunctionsParsed::ReadOnlyFunction { signature, body } => {
                     let (name, func) = handle_function(
@@ -67,7 +67,7 @@ pub fn set_functions_in_contract_context(
                         &context_name,
                         &mut ct,
                     )?;
-                    contract_context.functions.insert(name.clone(), func);
+                    contract_context.functions.insert(name, func);
                 }
                 DefineFunctionsParsed::PublicFunction { signature, body } => {
                     let (name, func) = handle_function(
@@ -78,7 +78,7 @@ pub fn set_functions_in_contract_context(
                         &context_name,
                         &mut ct,
                     )?;
-                    contract_context.functions.insert(name.clone(), func);
+                    contract_context.functions.insert(name, func);
                 }
                 DefineFunctionsParsed::Constant { .. }
                 | DefineFunctionsParsed::PersistedVariable { .. }

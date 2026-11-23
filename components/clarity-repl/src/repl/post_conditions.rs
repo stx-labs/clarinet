@@ -88,7 +88,7 @@ impl PostConditionCheck {
         let conditions = conditions
             .iter()
             .map(|hex| {
-                let bytes = hex_bytes(hex.strip_prefix("0x").unwrap_or(hex))
+                let bytes = hex_bytes(hex.trim_prefix("0x"))
                     .map_err(|e| format!("invalid post-condition hex: {e}"))?;
 
                 let mut remaining = bytes.as_slice();

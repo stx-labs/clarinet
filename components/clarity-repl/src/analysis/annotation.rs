@@ -19,8 +19,7 @@ impl std::str::FromStr for AnnotationKind {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s
             .trim()
-            .strip_prefix("#[")
-            .and_then(|s| s.strip_suffix(']'))
+            .strip_circumfix("#[", ']')
             .ok_or_else(|| "malformed annotation: expected #[...]".to_string())?
             .trim();
         let (name, value) = match s.find('(') {

@@ -13,7 +13,7 @@ pub(crate) struct BitcoinRpcClient {
 
 impl BitcoinRpcClient {
     pub(crate) fn new(url: String, username: String, password: String) -> Self {
-        let host = url.strip_prefix("http://").unwrap_or(&url).to_string();
+        let host = url.trim_prefix("http://").to_string();
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(30))
             .build()

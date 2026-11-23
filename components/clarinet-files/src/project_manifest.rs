@@ -734,9 +734,9 @@ mod tests {
             Some("latest"),
             // Replace "Clarity N" to "N" for clarity version
             Some(
-                &expected_current_clarity_version
+                expected_current_clarity_version
                     .to_string()
-                    .replace("Clarity ", ""),
+                    .trim_prefix("Clarity "),
             ),
         );
         assert_eq!(

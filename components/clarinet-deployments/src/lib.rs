@@ -7,6 +7,7 @@ pub mod onchain;
 pub mod requirements;
 pub mod source_remap;
 pub mod types;
+pub mod yaml;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -1142,8 +1143,7 @@ pub async fn generate_default_deployment_with_cache(
                             queue.push_back(dependency.contract_id.clone());
                         }
                         requirements_deps.insert(contract_id.clone(), dependencies);
-                        requirements_data
-                            .insert(contract_id.clone(), (clarity_version, Arc::new(ast)));
+                        requirements_data.insert(contract_id, (clarity_version, Arc::new(ast)));
                     }
                 }
                 Err((inferable_dependencies, non_inferable_dependencies)) => {

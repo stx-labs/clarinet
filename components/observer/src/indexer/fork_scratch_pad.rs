@@ -331,8 +331,7 @@ impl ForkScratchPad {
         {
             if divergence.block_ids_to_rollback.is_empty() {
                 let mut new_headers = vec![];
-                for i in 0..divergence.block_ids_to_apply.len() {
-                    let block_identifier = &divergence.block_ids_to_apply[i];
+                for block_identifier in &divergence.block_ids_to_apply {
                     let header = match self.headers_store.get(block_identifier) {
                         Some(header) => header.clone(),
                         None => {

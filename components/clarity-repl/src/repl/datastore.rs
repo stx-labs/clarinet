@@ -1141,8 +1141,7 @@ impl Datastore {
                 burn_block_header_hash.clone(),
             );
             self.burn_chain_tip = burn_block_header_hash.clone();
-            self.burn_blocks
-                .insert(burn_block_header_hash, burn_block.clone());
+            self.burn_blocks.insert(burn_block_header_hash, burn_block);
             self.burn_chain_height = next_height;
             self.tenure_height += 1;
             self.advance_stacks_chain_tip(clarity_datastore, 1);
