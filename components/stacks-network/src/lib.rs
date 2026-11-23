@@ -41,9 +41,8 @@ pub enum ChainsCoordinatorCommand {
     Terminate,
 }
 
-/// Sets up signal handlers for SIGINT and SIGTERM on Unix systems
-/// On Unix: Handles both SIGINT (Ctrl+C) and SIGTERM (kill) gracefully
-/// On Windows: Handles Ctrl+C via ctrlc crate
+/// Shuts the devnet down gracefully on SIGINT (Ctrl+C) and SIGTERM (kill) on
+/// Unix, and on Ctrl+C and Ctrl+Break on Windows.
 /// A second signal exits right away, leaving the devnet containers behind.
 fn setup_signal_handlers(
     orchestrator_terminator_tx: UnboundedSender<()>,
@@ -53,7 +52,7 @@ fn setup_signal_handlers(
     display_dashboard: bool,
 ) {
     let mut shutting_down = false;
-    let mut handle_signal = move |signal_name: &str, exit_code: i32| {
+    let handle_signal = move |signal_name: &str, exit_code: i32| {
         if shutting_down {
             if display_dashboard {
                 ui::restore_terminal();
@@ -71,31 +70,43 @@ fn setup_signal_handlers(
         let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
     };
 
-    #[cfg(unix)]
-    {
-        thread::spawn(move || {
-            use signal_hook::consts::{SIGINT, SIGTERM};
-            use signal_hook::iterator::Signals;
+    thread::spawn(move || {
+        let watching =
+            hiro_system_kit::create_basic_runtime().block_on(watch_shutdown_signals(handle_signal));
+        if let Err(e) = watching {
+            eprintln!("Failed to setup signal handlers: {e}");
+        }
+    });
+}
 
-            let mut signals = match Signals::new([SIGINT, SIGTERM]) {
-                Ok(signals) => signals,
-                Err(e) => {
-                    eprintln!("Failed to setup signal handlers: {}", e);
-                    return;
-                }
-            };
+#[cfg(unix)]
+async fn watch_shutdown_signals(mut handle_signal: impl FnMut(&str, i32)) -> std::io::Result<()> {
+    use tokio::signal::unix::{signal, SignalKind};
 
-            for sig in signals.forever() {
-                let signal_name = if sig == SIGINT { "SIGINT" } else { "SIGTERM" };
-                handle_signal(signal_name, 128 + sig);
-            }
-        });
+    let mut sigint = signal(SignalKind::interrupt())?;
+    let mut sigterm = signal(SignalKind::terminate())?;
+    loop {
+        // Exit codes are 128 + the signal number
+        tokio::select! {
+            Some(()) = sigint.recv() => handle_signal("SIGINT", 130),
+            Some(()) = sigterm.recv() => handle_signal("SIGTERM", 143),
+            else => return Ok(()),
+        }
     }
+}
 
-    #[cfg(not(unix))]
-    {
-        // On Windows and other platforms, use ctrlc for SIGINT/Ctrl+C
-        let _ = ctrlc::set_handler(move || handle_signal("Ctrl+C", 130));
+#[cfg(windows)]
+async fn watch_shutdown_signals(mut handle_signal: impl FnMut(&str, i32)) -> std::io::Result<()> {
+    use tokio::signal::windows::{ctrl_break, ctrl_c};
+
+    let mut ctrl_c = ctrl_c()?;
+    let mut ctrl_break = ctrl_break()?;
+    loop {
+        tokio::select! {
+            Some(()) = ctrl_c.recv() => handle_signal("Ctrl+C", 130),
+            Some(()) = ctrl_break.recv() => handle_signal("Ctrl+C", 130),
+            else => return Ok(()),
+        }
     }
 }
 

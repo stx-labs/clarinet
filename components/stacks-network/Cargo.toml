@@ -38,12 +38,6 @@ clarinet-deployments = { path = "../clarinet-deployments" }
 hiro-system-kit = { path = "../hiro-system-kit", features = ["log"] }
 observer = { path = "../observer" }
 
-[target.'cfg(unix)'.dependencies]
-signal-hook = { workspace = true, features = ["iterator"] }
-
-[target.'cfg(not(unix))'.dependencies]
-ctrlc = "3.1.9"
-
 [features]
 default = []
 stacks-signers = ["observer/stacks-signers"]
