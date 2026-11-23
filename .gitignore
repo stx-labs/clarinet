@@ -24,4 +24,3 @@ pnpm-debug.log*
 components/clarinet-files/clarinet-manifest.schema.json
 result
 .agents/reviews/
-.agentgraph/

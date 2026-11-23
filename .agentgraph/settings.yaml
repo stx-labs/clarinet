@@ -1,0 +1,30 @@
+toolchain: |
+  set -eu
+  rustup target add wasm32-unknown-unknown
+  rustup component add clippy
+  cargo install --locked wasm-pack
+  cargo install --locked wasm-bindgen-cli --version 0.2.114
+  npm install --prefix /cache/clarinet-tools pnpm@12.15.0
+  arch=$(uname -m)
+  case "$arch" in
+    aarch64) sum=526ed7d1b5b7433cf2a457cbac1aabab83c2e02859dc098ed8142bb7b53848a6 ;;
+    x86_64) sum=647488b9bf83555027b7ab3de0a2bc4b1f36007c5d4c0047e47cda9b831f533c ;;
+    *) echo "Unsupported Lodestone architecture: $arch" >&2; exit 1 ;;
+  esac
+  archive=/tmp/lodestone.tar.xz
+  curl --fail --location --silent --show-error "https://github.com/cylewitruk/lodestone/releases/download/v0.1.0/lodestone-cli-$arch-unknown-linux-gnu.tar.xz" -o "$archive"
+  printf '%s  %s\n' "$sum" "$archive" | sha256sum -c -
+  mkdir -p /cache/clarinet-tools/lodestone /cache/cargo/bin /cache/lodestone
+  tar -xJf "$archive" --strip-components=1 -C /cache/clarinet-tools/lodestone
+  printf '%s\n' 'model = "bge-small"' 'backend = "candle-cpu"' > /cache/lodestone/config.toml
+  printf '%s\n' '#!/bin/sh' 'export LODESTONE_HOME=/cache/lodestone' 'exec /cache/clarinet-tools/lodestone/lode --local "$@"' > /cache/cargo/bin/lode
+  chmod +x /cache/cargo/bin/lode
+  mkdir -p /tmp/lodestone-model
+  git -C /tmp/lodestone-model init -q
+  printf '%s\n' 'export const ready = () => true;' > /tmp/lodestone-model/ready.ts
+  lode register /tmp/lodestone-model
+setup: sh "$AGENTGRAPH_DIR/scripts/setup.sh"
+limits:
+  minutes: 30
+  usd-per-run: 5
+  parallel: 1
