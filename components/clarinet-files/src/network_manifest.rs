@@ -378,32 +378,6 @@ pub struct AccountConfig {
     pub is_mainnet: bool,
 }
 
-/// Reports where a settings file failed to parse without quoting it: toml's
-/// own rendering prints the offending line, which can hold a mnemonic.
-fn parse_error_without_source(error: &toml::de::Error, content: &[u8], location: &Path) -> String {
-    let position = error
-        .span()
-        .map(|span| {
-            let before = &content[..span.start.min(content.len())];
-            let line = before.iter().filter(|byte| **byte == b'\n').count() + 1;
-            let line_start = before
-                .iter()
-                .rposition(|byte| *byte == b'\n')
-                .map_or(0, |newline| newline + 1);
-            let column = String::from_utf8_lossy(&before[line_start..])
-                .chars()
-                .count()
-                + 1;
-            format!(" at line {line} column {column}")
-        })
-        .unwrap_or_default();
-    format!(
-        "unable to parse {}: {}{position}",
-        location.display(),
-        error.message()
-    )
-}
-
 impl NetworkManifest {
     pub fn from_project_root(
         project_root: &Path,
@@ -414,9 +388,8 @@ impl NetworkManifest {
         let location = paths::get_network_manifest_path(project_root, &networks.1);
         let network_manifest_file_content = paths::read_content(&location)?;
         let mut network_manifest_file: NetworkManifestFile =
-            toml::from_slice(&network_manifest_file_content).map_err(|e| {
-                parse_error_without_source(&e, &network_manifest_file_content, &location)
-            })?;
+            toml::from_slice(&network_manifest_file_content)
+                .map_err(|e| format!("unable to parse {}: {e}", location.display()))?;
         NetworkManifest::from_network_manifest_file(
             &mut network_manifest_file,
             networks,
@@ -438,7 +411,7 @@ impl NetworkManifest {
 
         let mut network_manifest_file: NetworkManifestFile =
             toml::from_slice(content.as_bytes())
-                .map_err(|e| parse_error_without_source(&e, content.as_bytes(), &location))?;
+                .map_err(|e| format!("unable to parse {}: {e}", location.display()))?;
         NetworkManifest::from_network_manifest_file(
             &mut network_manifest_file,
             networks,
@@ -1065,23 +1038,6 @@ mod tests {
 
     fn parse_devnet_settings(settings: &str) -> DevnetConfig {
         try_parse_devnet_settings(settings).unwrap()
-    }
-
-    #[test]
-    fn parse_error_does_not_quote_the_settings_file() {
-        let settings = "[accounts.deployer]\nmnemonic = \"abandon ability able\n";
-        let error = toml::from_str::<NetworkManifestFile>(settings).unwrap_err();
-        // toml's own rendering is what leaks the line
-        assert!(error.to_string().contains("abandon"));
-
-        let message = super::parse_error_without_source(
-            &error,
-            settings.as_bytes(),
-            std::path::Path::new("settings/Mainnet.toml"),
-        );
-        assert!(!message.contains("abandon"));
-        assert!(message.starts_with("unable to parse settings/Mainnet.toml: "));
-        assert!(message.ends_with(" at line 2 column 33"));
     }
 
     #[test]

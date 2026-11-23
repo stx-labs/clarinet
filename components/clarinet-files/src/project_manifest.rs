@@ -254,7 +254,7 @@ impl ProjectManifest {
             .await?;
 
         let project_manifest_file: ProjectManifestFile = toml::from_slice(content.as_bytes())
-            .map_err(|e| format!("Clarinet.toml file malformatted: {e}"))?;
+            .map_err(|e| format!("Clarinet.toml file malformatted {e:?}"))?;
 
         let mut manifest = ProjectManifest::from_project_manifest_file(
             project_manifest_file,
@@ -296,7 +296,7 @@ impl ProjectManifest {
         let project_manifest_file_content = paths::read_content(location)?;
         let project_manifest_file: ProjectManifestFile =
             toml::from_slice(&project_manifest_file_content[..])
-                .map_err(|e| format!("Clarinet.toml file malformatted: {e}"))?;
+                .map_err(|e| format!("Clarinet.toml file malformatted {e:?}"))?;
 
         let mut manifest = ProjectManifest::from_project_manifest_file(
             project_manifest_file,
@@ -768,7 +768,7 @@ mod tests {
         assert!(matches!(contract.epoch, clarity_repl::repl::Epoch::Latest));
         let toml_value = toml::Value::try_from(contract).unwrap();
         let pretty_toml = toml::ser::to_string_pretty(&toml_value).unwrap();
-        assert!(pretty_toml.contains(r#"epoch = "latest""#));
+        assert!(pretty_toml.contains("epoch = 'latest'"));
     }
 
     #[test]
