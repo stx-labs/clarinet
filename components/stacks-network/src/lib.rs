@@ -150,13 +150,6 @@ pub fn do_run_local_devnet(
         && !create_new_snapshot
         && diff.is_ok()
         && prepare_global_snapshot(&devnet_config, &devnet_events_tx);
-    let file_appender =
-        tracing_appender::rolling::never(&devnet_config.working_dir, "networking.log");
-    let (non_blocking, _guard) = tracing_appender::non_blocking(file_appender);
-    let _ = tracing_subscriber::fmt()
-        .with_max_level(tracing::Level::INFO)
-        .with_writer(non_blocking)
-        .try_init();
 
     // The event observer should be able to send some events to the UI thread,
     // and should be able to be terminated
