@@ -11,7 +11,6 @@ mod snapshot_extractor;
 mod ui;
 
 use std::sync::mpsc::{channel, Sender};
-use std::thread;
 
 use chains_coordinator::{start_chains_coordinator, BitcoinMiningCommand};
 use clarinet_deployments::types::DeploymentSpecification;
@@ -70,13 +69,15 @@ fn setup_signal_handlers(
         let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
     };
 
-    thread::spawn(move || {
-        let watching =
-            hiro_system_kit::create_basic_runtime().block_on(watch_shutdown_signals(handle_signal));
-        if let Err(e) = watching {
-            eprintln!("Failed to setup signal handlers: {e}");
-        }
-    });
+    hiro_system_kit::thread_named("Signal handler")
+        .spawn(move || {
+            let watching = hiro_system_kit::create_basic_runtime()
+                .block_on(watch_shutdown_signals(handle_signal));
+            if let Err(e) = watching {
+                eprintln!("Failed to setup signal handlers: {e}");
+            }
+        })
+        .expect("unable to retrieve join handle");
 }
 
 #[cfg(unix)]
@@ -104,7 +105,7 @@ async fn watch_shutdown_signals(mut handle_signal: impl FnMut(&str, i32)) -> std
     loop {
         tokio::select! {
             Some(()) = ctrl_c.recv() => handle_signal("Ctrl+C", 130),
-            Some(()) = ctrl_break.recv() => handle_signal("Ctrl+C", 130),
+            Some(()) = ctrl_break.recv() => handle_signal("Ctrl+Break", 130),
             else => return Ok(()),
         }
     }

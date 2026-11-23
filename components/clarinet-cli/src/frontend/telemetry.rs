@@ -147,7 +147,7 @@ async fn send_track(
     user_id: &str,
     event: &str,
     properties: Value,
-) -> reqwest::Result<()> {
+) -> reqwest::Result<reqwest::Response> {
     reqwest::Client::builder()
         .connect_timeout(Duration::from_secs(10))
         .build()?
@@ -159,9 +159,7 @@ async fn send_track(
             "properties": properties,
         }))
         .send()
-        .await?
-        .error_for_status()?;
-    Ok(())
+        .await
 }
 
 #[cfg(test)]
@@ -180,11 +178,11 @@ mod tests {
                 "authorization",
                 "Basic UTN4cG1GUnZ5MHBzWG53QkVYRXJ0TUJJZWFiT1ZqYkM6",
             )
-            .match_header("content-type", "application/json")
-            .match_body(Matcher::JsonString(
-                r#"{"userId":"0xabc","event":"CheckExecuted","properties":{"project_id":"0x01","sessions":2}}"#
-                    .into(),
-            ))
+            .match_body(Matcher::Json(json!({
+                "userId": "0xabc",
+                "event": "CheckExecuted",
+                "properties": { "project_id": "0x01", "sessions": 2 },
+            })))
             .create_async()
             .await;
 

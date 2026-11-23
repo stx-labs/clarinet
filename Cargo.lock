@@ -741,7 +741,6 @@ dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
  "bitcoincore-rpc-json",
- "bs58",
  "clarinet-defaults",
  "clarinet-files",
  "clarinet-utils",
@@ -2916,7 +2915,6 @@ dependencies = [
  "base64 0.22.1",
  "bitcoincore-rpc",
  "bitcoincore-rpc-json",
- "bs58",
  "clarity",
  "crossbeam-channel",
  "hex",
@@ -4400,7 +4398,6 @@ version = "4.0.0"
 dependencies = [
  "bitcoincore-rpc",
  "bollard",
- "bs58",
  "chrono",
  "clarinet-deployments",
  "clarinet-files",

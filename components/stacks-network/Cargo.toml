@@ -18,7 +18,6 @@ crossterm = { workspace = true }
 ratatui = { workspace = true }
 chrono = { workspace = true }
 futures = { workspace = true }
-bs58 = { workspace = true }
 tokio = { workspace = true}
 toml = { workspace = true }
 flate2 = "1.1.1"

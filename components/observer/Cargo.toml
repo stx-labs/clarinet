@@ -27,7 +27,6 @@ default = []
 stacks-signers = ["dep:libsigner"]
 
 [dev-dependencies]
-bs58 = { workspace = true }
 mockito = { workspace = true }
 test-case = { workspace = true }
 
