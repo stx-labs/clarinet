@@ -24,7 +24,6 @@ futures = { workspace = true }
 base58 = { workspace = true }
 tokio = { workspace = true}
 toml = { workspace = true }
-rand = { workspace = true }
 flate2 = "1.1.1"
 tar = "0.4.45"
 indoc = { workspace = true }

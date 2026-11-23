@@ -2807,17 +2807,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "miniscript"
-version = "11.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ca1d13489323d955aadba3d9f7805acf0d1258a7ebd05c2070010c5fbd936fc"
-dependencies = [
- "bech32",
- "bitcoin",
- "bitcoin-internals",
-]
-
-[[package]]
 name = "miniz_oxide"
 version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3048,7 +3037,6 @@ dependencies = [
  "hex",
  "hiro-system-kit",
  "libsigner",
- "miniscript",
  "mockito",
  "reqwest",
  "serde",
@@ -4595,7 +4583,6 @@ dependencies = [
  "indoc",
  "mockito",
  "observer",
- "rand 0.9.4",
  "ratatui",
  "reqwest",
  "serde",

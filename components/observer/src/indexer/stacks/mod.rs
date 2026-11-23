@@ -855,7 +855,7 @@ pub fn standardize_stacks_signer_peer_info(
 pub fn standardize_stacks_nakamoto_block(
     block: &stackslib::chainstate::nakamoto::NakamotoBlock,
 ) -> Result<NakamotoBlockData, String> {
-    use miniscript::bitcoin::hex::{Case, DisplayHex};
+    use bitcoincore_rpc::bitcoin::hex::{Case, DisplayHex};
 
     let block_hash = get_nakamoto_block_hash(block)?;
     Ok(NakamotoBlockData {
@@ -931,9 +931,9 @@ pub fn get_signer_pubkey_from_message_hash(
     message_hash: &[u8],
     signature: &clarity::util::secp256k1::MessageSignature,
 ) -> Result<[u8; 33], String> {
-    use miniscript::bitcoin::key::Secp256k1;
-    use miniscript::bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
-    use miniscript::bitcoin::secp256k1::Message;
+    use bitcoincore_rpc::bitcoin::key::Secp256k1;
+    use bitcoincore_rpc::bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
+    use bitcoincore_rpc::bitcoin::secp256k1::Message;
 
     let (first, sig) = signature.0.split_at(1);
     let rec_id = first[0];
@@ -958,10 +958,10 @@ pub fn get_signer_pubkey_from_stackerdb_chunk_slot(
     slot: &NewSignerModifiedSlot,
     data_bytes: &[u8],
 ) -> Result<String, String> {
+    use bitcoincore_rpc::bitcoin::key::Secp256k1;
+    use bitcoincore_rpc::bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
+    use bitcoincore_rpc::bitcoin::secp256k1::Message;
     use clarity::util::hash::Sha512Trunc256Sum;
-    use miniscript::bitcoin::key::Secp256k1;
-    use miniscript::bitcoin::secp256k1::ecdsa::{RecoverableSignature, RecoveryId};
-    use miniscript::bitcoin::secp256k1::Message;
 
     let mut digest_bytes = slot.slot_id.to_be_bytes().to_vec();
     digest_bytes.extend(slot.slot_version.to_be_bytes());
