@@ -982,7 +982,7 @@ fn compute_btc_address(public_key: &[u8], network: &BitcoinNetwork) -> String {
     let public_key =
         bitcoin::PublicKey::from_slice(public_key).expect("Unable to recreate public key");
     let btc_address = bitcoin::Address::p2pkh(
-        &public_key,
+        public_key,
         match network {
             BitcoinNetwork::Signet => bitcoin::Network::Signet,
             BitcoinNetwork::Regtest => bitcoin::Network::Regtest,
