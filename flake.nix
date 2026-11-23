@@ -37,7 +37,7 @@
 
         # Hash for clarity git dependency - update this when Cargo.lock changes
         # Run `nix run .#check-git-dependencies-hash` to verify or get the new hash
-        clarityHash = "sha256-lDlMpT+UbKonv/NYX+g9e+tM1BQtLKYx9E/9p54VEjM=";
+        clarityHash = "sha256-FH989VxPqOw26YCzVlW2VEFzGM7KyTWkg4Yq9HcYbwI=";
 
         clarinet = rustPlatform.buildRustPackage {
           inherit pname version;
@@ -76,6 +76,10 @@
 
           # Skip tests that require network access or additional setup
           doCheck = false;
+
+          # nixpkgs' cargoUseSystemLibs hook forces system libraries over
+          # vendored ones; keep bundled SQLite and vendored jemalloc
+          dontCargoUseSystemLibs = true;
 
           passthru = {
             rustc = rustToolchain;

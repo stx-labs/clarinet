@@ -183,7 +183,7 @@ mod stacks_signers_conversions {
                     validation_failed: c.into(),
                 },
                 RejectCode::NoSortitionView => Self::NoSortitionView,
-                // The upstream `String` payload is dropped here; downstream consumers
+                // The upstream string payload is dropped here; downstream consumers
                 // see only the unit variant that the observer's wire format defines.
                 RejectCode::ConnectivityIssues(_) => Self::ConnectivityIssues,
                 RejectCode::RejectedInPriorRound => Self::RejectedInPriorRound,
@@ -233,10 +233,10 @@ mod stacks_signers_conversions {
                 BlockRejectReasonCode::from(RejectCode::NoSortitionView),
                 BlockRejectReasonCode::NoSortitionView
             );
-            // Upstream's `String` payload is dropped on the way to the unit variant.
+            // Upstream's string payload is dropped on the way to the unit variant.
             assert_eq!(
                 BlockRejectReasonCode::from(RejectCode::ConnectivityIssues(
-                    "peer unreachable".to_string()
+                    "peer unreachable".into()
                 )),
                 BlockRejectReasonCode::ConnectivityIssues
             );
