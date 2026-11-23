@@ -2,10 +2,10 @@ use std::io;
 use std::path::Path;
 use std::time::Duration;
 
-use bollard::container::{DownloadFromContainerOptions, UploadToContainerOptions};
 use bollard::errors::Error as DockerError;
 use bollard::exec::{CreateExecOptions, StartExecResults};
-use bollard::Docker;
+use bollard::query_parameters::{DownloadFromContainerOptions, UploadToContainerOptions};
+use bollard::{body_full, Docker};
 use futures::TryStreamExt;
 
 /// The daemon answers an upload only once the archive is extracted.
@@ -85,13 +85,14 @@ async fn upload(
     archive: Vec<u8>,
 ) -> Result<(), DockerError> {
     let options = UploadToContainerOptions {
-        path: dir,
-        no_overwrite_dir_non_dir: "true",
+        path: dir.to_string(),
+        no_overwrite_dir_non_dir: Some("true".to_string()),
+        ..Default::default()
     };
     docker
         .clone()
         .with_timeout(UPLOAD_TIMEOUT)
-        .upload_to_container(container, Some(options), archive.into())
+        .upload_to_container(container, Some(options), body_full(archive.into()))
         .await
 }
 
@@ -145,7 +146,12 @@ pub async fn copy_file_from_container(
     dest: &Path,
 ) -> Result<(), String> {
     let archive: Vec<u8> = docker
-        .download_from_container(container, Some(DownloadFromContainerOptions { path: src }))
+        .download_from_container(
+            container,
+            Some(DownloadFromContainerOptions {
+                path: src.to_string(),
+            }),
+        )
         .map_ok(|chunk| chunk.to_vec())
         .try_concat()
         .await
