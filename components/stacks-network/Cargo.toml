@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies]
 bitcoincore-rpc = { workspace= true }
-bollard = "0.17"
+bollard = "0.21"
 colored = { workspace = true }
 dirs = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
