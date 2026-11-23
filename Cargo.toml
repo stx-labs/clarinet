@@ -56,7 +56,7 @@ colored = "3"
 console_error_panic_hook = "0.1"
 crossbeam-channel = "0.5.6"
 crossterm = "0.29.0"
-dirs = "6.0.0"
+dirs = "7.0.0"
 divan = "0.1"
 futures = "0.3.12"
 getrandom = { version = "0.3", features = ["wasm_js"] }
@@ -84,7 +84,7 @@ strum = "0.28.0"
 tempfile = "3.24.0"
 test-case = "3.1.0"
 thiserror = "2"
-tikv-jemallocator = "0.6.1"
+tikv-jemallocator = "0.7.0"
 tokio = { version = "1.54.1", features = ["full"] }
 tokio-util = { version = "0.7.16", features = ["codec"] }
 toml = { version = "0.5.6", features = ["preserve_order"] }

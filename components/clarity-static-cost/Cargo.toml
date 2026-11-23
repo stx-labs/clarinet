@@ -20,7 +20,7 @@ clarity = { workspace = true, default-features = false, features = [
     "testing",
 ] }
 stackslib = { workspace = true, default-features = false }
-rstest = "0.26.1"
+rstest = "0.29.0"
 indoc = { workspace = true }
 
 [lib]
