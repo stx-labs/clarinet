@@ -472,9 +472,9 @@ dependencies = [
 
 [[package]]
 name = "bollard"
-version = "0.17.1"
+version = "0.21.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d41711ad46fda47cd701f6908e59d1bd6b9a2b7464c0d0aeab95c6d37096ff8a"
+checksum = "dbe8358268799ebb3e4df23cb9d47f4c72bbc4f5247e2fa6a1bf7b6c0baea220"
 dependencies = [
  "base64 0.22.1",
  "bollard-stubs",
@@ -493,9 +493,8 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "serde_repr",
  "serde_urlencoded",
- "thiserror 1.0.69",
+ "thiserror 2.0.21",
  "tokio",
  "tokio-util",
  "tower-service",
@@ -505,13 +504,13 @@ dependencies = [
 
 [[package]]
 name = "bollard-stubs"
-version = "1.45.0-rc.26.0.1"
+version = "1.53.1-rc.29.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6d7c5415e3a6bc6d3e99eff6268e488fd4ee25e7b28c10f08fa6760bd9de16e4"
+checksum = "ce412eb6f7096743011dc3cb5c674caeb24ced61d8c498fe07cf7998a4fea889"
 dependencies = [
  "serde",
+ "serde_json",
  "serde_repr",
- "serde_with",
 ]
 
 [[package]]
@@ -777,7 +776,7 @@ dependencies = [
  "indoc",
  "js-sys",
  "rpassword",
- "schemars 1.2.1",
+ "schemars",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -838,7 +837,7 @@ dependencies = [
 [[package]]
 name = "clarity"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "clarity-types",
  "integer-sqrt",
@@ -914,7 +913,7 @@ dependencies = [
  "reqwest",
  "rusqlite",
  "rustyline",
- "schemars 1.2.1",
+ "schemars",
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
@@ -948,7 +947,7 @@ dependencies = [
 [[package]]
 name = "clarity-types"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "lazy_static",
  "regex",
@@ -1366,6 +1365,7 @@ checksum = "9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292"
 dependencies = [
  "block-buffer 0.10.4",
  "crypto-common 0.1.6",
+ "subtle",
 ]
 
 [[package]]
@@ -2048,6 +2048,15 @@ dependencies = [
 
 [[package]]
 name = "hmac"
+version = "0.12.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6c49c37c09c17a53d937dfbb742eb3a961d65a994e6bcdcf37e7399d0cc8ab5e"
+dependencies = [
+ "digest 0.10.7",
+]
+
+[[package]]
+name = "hmac"
 version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6303bc9732ae41b04cb554b844a762b4115a61bfaa81e3e83050991eeb56863f"
@@ -2369,7 +2378,6 @@ checksum = "bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99"
 dependencies = [
  "autocfg",
  "hashbrown 0.12.3",
- "serde",
 ]
 
 [[package]]
@@ -2634,7 +2642,7 @@ dependencies = [
 [[package]]
 name = "libsigner"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "clarity",
  "hashbrown 0.15.5",
@@ -2663,7 +2671,7 @@ dependencies = [
 [[package]]
 name = "libstackerdb"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "clarity",
  "serde",
@@ -2795,17 +2803,6 @@ checksum = "4869b6a491569605d66d3952bcdf03df789e5b536e5f0cf7758a7f08a55ae24d"
 dependencies = [
  "cc",
  "walkdir",
-]
-
-[[package]]
-name = "miniscript"
-version = "11.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0ca1d13489323d955aadba3d9f7805acf0d1258a7ebd05c2070010c5fbd936fc"
-dependencies = [
- "bech32",
- "bitcoin",
- "bitcoin-internals",
 ]
 
 [[package]]
@@ -3039,7 +3036,6 @@ dependencies = [
  "hex",
  "hiro-system-kit",
  "libsigner",
- "miniscript",
  "mockito",
  "reqwest",
  "serde",
@@ -3243,7 +3239,7 @@ checksum = "439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391"
 [[package]]
 name = "pox-locking"
 version = "2.4.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "clarity",
  "serde",
@@ -3959,18 +3955,6 @@ dependencies = [
 
 [[package]]
 name = "schemars"
-version = "0.9.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4cd191f9397d57d581cddd31014772520aa448f65ef991055d7f61582c65165f"
-dependencies = [
- "dyn-clone",
- "ref-cast",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "schemars"
 version = "1.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2b42f36aa1cd011945615b92222f6bf73c599a102a300334cd7f8dbeec726cc"
@@ -4095,9 +4079,9 @@ checksum = "d767eb0aabc880b29956c35734170f26ed551a859dbd361d140cdbeca61ab1e2"
 
 [[package]]
 name = "serde"
-version = "1.0.228"
+version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a8e94ea7f378bd32cbbd37198a4a91436180c5bb472411e48b5ec2e2124ae9e"
+checksum = "4148590afebada386688f18773da617792bf2ef03ffc1e4cbd2b1d45b023e0ba"
 dependencies = [
  "serde_core",
  "serde_derive",
@@ -4133,22 +4117,22 @@ dependencies = [
 
 [[package]]
 name = "serde_core"
-version = "1.0.228"
+version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "41d385c7d4ca58e59fc732af25c3983b67ac852c1a25000afe1175de458b67ad"
+checksum = "67dca2c9c51e58a4791a4b1ed58308b39c64224d349a935ab5039aa360942a48"
 dependencies = [
  "serde_derive",
 ]
 
 [[package]]
 name = "serde_derive"
-version = "1.0.228"
+version = "1.0.229"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d540f220d3187173da220f885ab66608367b6574e925011a9353e4badda91d79"
+checksum = "e7a5d71263a5a7d47b41f6b3f06ba276f10cc18b0931f1799f710578e2309348"
 dependencies = [
  "proc-macro2",
  "quote",
- "syn 2.0.117",
+ "syn 3.0.9",
 ]
 
 [[package]]
@@ -4164,10 +4148,11 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.149"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "83fc039473c5595ace860d8c4fafa220ff474b3fc6bfdb4293327f1a37e94d86"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
+ "foldhash 0.2.0",
  "indexmap 2.14.2",
  "itoa",
  "memchr",
@@ -4219,25 +4204,6 @@ dependencies = [
  "itoa",
  "ryu",
  "serde",
-]
-
-[[package]]
-name = "serde_with"
-version = "3.21.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "76a5c54c7310e7b8b9577c286d7e399ddd876c3e12b3ed917a8aabc4b96e9e8c"
-dependencies = [
- "base64 0.22.1",
- "bs58",
- "chrono",
- "hex",
- "indexmap 1.9.3",
- "indexmap 2.14.2",
- "schemars 0.9.0",
- "schemars 1.2.1",
- "serde_core",
- "serde_json",
- "time",
 ]
 
 [[package]]
@@ -4536,7 +4502,7 @@ dependencies = [
 [[package]]
 name = "stacks-codec"
 version = "0.1.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "clarity-types",
  "serde",
@@ -4546,8 +4512,8 @@ dependencies = [
 
 [[package]]
 name = "stacks-common"
-version = "4.0.5"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+version = "4.0.7"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "chrono",
  "curve25519-dalek",
@@ -4576,8 +4542,8 @@ dependencies = [
 
 [[package]]
 name = "stacks-marf"
-version = "4.0.5"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+version = "4.0.7"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "nix 0.23.2",
  "rusqlite",
@@ -4610,7 +4576,6 @@ dependencies = [
  "indoc",
  "mockito",
  "observer",
- "rand 0.9.4",
  "ratatui",
  "reqwest",
  "serde",
@@ -4645,7 +4610,7 @@ dependencies = [
 [[package]]
 name = "stacks-transactions"
 version = "0.1.0"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "clarity-types",
  "stacks-codec",
@@ -4655,10 +4620,11 @@ dependencies = [
 [[package]]
 name = "stackslib"
 version = "0.0.1"
-source = "git+https://github.com/stacks-network/stacks-core.git?rev=8fd6f80bc5e5b528655eb4162979bdb79c0e76f0#8fd6f80bc5e5b528655eb4162979bdb79c0e76f0"
+source = "git+https://github.com/stacks-network/stacks-core.git?rev=be32eb8c1a2a29c7313130949bc571616d7a5e68#be32eb8c1a2a29c7313130949bc571616d7a5e68"
 dependencies = [
  "clarity",
  "ed25519-dalek",
+ "hmac 0.12.1",
  "lazy_static",
  "libstackerdb",
  "mio 0.6.23",
