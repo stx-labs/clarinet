@@ -65,7 +65,6 @@ indoc = "2.0.3"
 js-sys = "0.3.80"
 mockito = { version = "1.7", default-features = false }
 pretty_assertions = "1.4"
-rand = "0.9.4"
 ratatui = { version = "0.30.0", default-features = false, features = [
     "crossterm",
 ] }

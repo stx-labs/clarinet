@@ -824,7 +824,7 @@ dependencies = [
  "bip39",
  "bs58",
  "divan",
- "rand 0.9.4",
+ "getrandom 0.3.4",
  "strum",
 ]
 

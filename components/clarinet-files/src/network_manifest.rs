@@ -471,7 +471,7 @@ impl NetworkManifest {
                                     ));
                             }
                         },
-                        _ => random_mnemonic(),
+                        _ => random_mnemonic()?,
                     };
 
                     // The strongest key present wins
