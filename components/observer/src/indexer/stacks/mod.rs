@@ -734,7 +734,7 @@ pub fn standardize_stacks_stackerdb_chunks(
                 ),
                 BlockResponse::Rejected(block_rejection) => StacksSignerMessage::BlockResponse(
                     BlockResponseData::Rejected(BlockRejectedResponse {
-                        reason: block_rejection.reason,
+                        reason: block_rejection.reason.into(),
                         reason_code: block_rejection.reason_code.into(),
                         signer_signature_hash: format!(
                             "0x{}",
