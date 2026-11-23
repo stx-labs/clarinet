@@ -149,7 +149,7 @@ async fn send_track(
     properties: Value,
 ) -> reqwest::Result<reqwest::Response> {
     reqwest::Client::builder()
-        .connect_timeout(Duration::from_secs(10))
+        .timeout(Duration::from_secs(10))
         .build()?
         .post(format!("{host}/v1/track"))
         .basic_auth(SEGMENT_WRITE_KEY, Some(""))

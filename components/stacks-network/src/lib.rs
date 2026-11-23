@@ -69,23 +69,30 @@ fn setup_signal_handlers(
         let _ = mining_command_tx.send(BitcoinMiningCommand::Pause);
     };
 
+    let (listening_tx, listening_rx) = channel();
     hiro_system_kit::thread_named("Signal handler")
         .spawn(move || {
             let watching = hiro_system_kit::create_basic_runtime()
-                .block_on(watch_shutdown_signals(handle_signal));
+                .block_on(watch_shutdown_signals(handle_signal, listening_tx));
             if let Err(e) = watching {
                 eprintln!("Failed to setup signal handlers: {e}");
             }
         })
         .expect("unable to retrieve join handle");
+    // Until the listeners exist, a signal still kills the process outright
+    let _ = listening_rx.recv();
 }
 
 #[cfg(unix)]
-async fn watch_shutdown_signals(mut handle_signal: impl FnMut(&str, i32)) -> std::io::Result<()> {
+async fn watch_shutdown_signals(
+    mut handle_signal: impl FnMut(&str, i32),
+    listening: Sender<()>,
+) -> std::io::Result<()> {
     use tokio::signal::unix::{signal, SignalKind};
 
     let mut sigint = signal(SignalKind::interrupt())?;
     let mut sigterm = signal(SignalKind::terminate())?;
+    let _ = listening.send(());
     loop {
         // Exit codes are 128 + the signal number
         tokio::select! {
@@ -97,11 +104,15 @@ async fn watch_shutdown_signals(mut handle_signal: impl FnMut(&str, i32)) -> std
 }
 
 #[cfg(windows)]
-async fn watch_shutdown_signals(mut handle_signal: impl FnMut(&str, i32)) -> std::io::Result<()> {
+async fn watch_shutdown_signals(
+    mut handle_signal: impl FnMut(&str, i32),
+    listening: Sender<()>,
+) -> std::io::Result<()> {
     use tokio::signal::windows::{ctrl_break, ctrl_c};
 
     let mut ctrl_c = ctrl_c()?;
     let mut ctrl_break = ctrl_break()?;
+    let _ = listening.send(());
     loop {
         tokio::select! {
             Some(()) = ctrl_c.recv() => handle_signal("Ctrl+C", 130),
