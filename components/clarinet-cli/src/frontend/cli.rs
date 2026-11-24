@@ -1251,20 +1251,22 @@ pub fn main() {
                         ));
 
                         #[cfg(feature = "telemetry")]
-                        let mut debug_count = 0;
-                        for command in terminal.executed {
-                            if command.starts_with("::debug") {
-                                debug_count += 1;
+                        {
+                            let mut debug_count = 0;
+                            for command in terminal.executed {
+                                if command.starts_with("::debug") {
+                                    debug_count += 1;
+                                }
                             }
-                        }
-                        if debug_count > 0 {
-                            telemetry_report_event(DeveloperUsageEvent::DebugStarted(
-                                DeveloperUsageDigest::new(
-                                    &manifest.project.name,
-                                    &manifest.project.authors,
-                                ),
-                                debug_count,
-                            ));
+                            if debug_count > 0 {
+                                telemetry_report_event(DeveloperUsageEvent::DebugStarted(
+                                    DeveloperUsageDigest::new(
+                                        &manifest.project.name,
+                                        &manifest.project.authors,
+                                    ),
+                                    debug_count,
+                                ));
+                            }
                         }
                     }
                 }

@@ -471,7 +471,7 @@ impl NetworkManifest {
                                     ));
                             }
                         },
-                        _ => random_mnemonic(),
+                        _ => random_mnemonic()?,
                     };
 
                     // The strongest key present wins
@@ -483,7 +483,7 @@ impl NetworkManifest {
                         .filter(|(cipher, _)| !cipher.is_empty());
 
                     if let Some((cipher, strength)) = encrypted {
-                        let password = rpassword::prompt_password(format!(
+                        let password = prompt_password(format!(
                             "Enter password to decrypt mnemonic for account {account_name}: "
                         ))
                         .unwrap();
@@ -982,7 +982,7 @@ fn compute_btc_address(public_key: &[u8], network: &BitcoinNetwork) -> String {
     let public_key =
         bitcoin::PublicKey::from_slice(public_key).expect("Unable to recreate public key");
     let btc_address = bitcoin::Address::p2pkh(
-        &public_key,
+        public_key,
         match network {
             BitcoinNetwork::Signet => bitcoin::Network::Signet,
             BitcoinNetwork::Regtest => bitcoin::Network::Regtest,
@@ -1017,6 +1017,15 @@ pub fn is_in_reward_phase(
 #[cfg(target_arch = "wasm32")]
 fn compute_btc_address(_public_key: &[u8], _network: &BitcoinNetwork) -> String {
     "__not_implemented__".to_string()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+use rpassword::prompt_password;
+
+/// There is no terminal to prompt on
+#[cfg(target_arch = "wasm32")]
+fn prompt_password(_prompt: String) -> std::io::Result<String> {
+    Err(std::io::ErrorKind::Unsupported.into())
 }
 
 #[cfg(test)]

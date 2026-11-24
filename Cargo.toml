@@ -43,13 +43,12 @@ clarinet-defaults = { path = "components/clarinet-defaults" }
 # External crates
 aes-gcm = { version = "0.11.1", default-features = false }
 argon2 = { version = "0.6.0", default-features = false }
-base58 = "0.2.0"
 base64 = "0.22.1"
 bip32 = "0.6.0"
 bip39 = "3.0.0"
-bitcoin = "0.31.2"
-bitcoincore-rpc = "0.18.0"
-bitcoincore-rpc-json = "0.18.0"
+bitcoin = "0.32.8"
+bitcoincore-rpc = "0.19.0"
+bitcoincore-rpc-json = "0.19.0"
 bs58 = "0.5"
 chrono = "0.4.42"
 clap = "4.5.57"
@@ -57,7 +56,6 @@ colored = "3"
 console_error_panic_hook = "0.1"
 crossbeam-channel = "0.5.6"
 crossterm = "0.29.0"
-dirs = "6.0.0"
 divan = "0.1"
 futures = "0.3.12"
 getrandom = { version = "0.3", features = ["wasm_js"] }
@@ -66,7 +64,6 @@ indoc = "2.0.3"
 js-sys = "0.3.80"
 mockito = { version = "1.7", default-features = false }
 pretty_assertions = "1.4"
-rand = "0.9.4"
 ratatui = { version = "0.30.0", default-features = false, features = [
     "crossterm",
 ] }
@@ -82,12 +79,11 @@ serde = "1.0.229"
 serde_json = "1.0.149"
 serde-saphyr = { version = "2.0.0", default-features = false, features = ["serialize", "deserialize"] }
 serde-wasm-bindgen = "0.6.4"
-signal-hook = "0.4.3"
 strum = "0.28.0"
 tempfile = "3.24.0"
 test-case = "3.1.0"
 thiserror = "2"
-tikv-jemallocator = "0.6.1"
+tikv-jemallocator = "0.7.0"
 tokio = { version = "1.54.1", features = ["full"] }
 tokio-util = { version = "0.7.16", features = ["codec"] }
 toml = { version = "0.5.6", features = ["preserve_order"] }

@@ -7,8 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use std::{fs, str};
 
-use base58::FromBase58;
-use bitcoincore_rpc::bitcoin::Address;
+use bitcoincore_rpc::bitcoin::{base58, Address};
 use bollard::Docker;
 use clarinet_deployments::onchain::{
     apply_on_chain_deployment, is_contract_published, DeploymentCommand, DeploymentEvent,
@@ -1506,9 +1505,7 @@ fn get_stacking_tx_method_and_args(
     duration: u32,
     auth_id: u128,
 ) -> (String, Vec<ClarityValue>) {
-    let addr_bytes = btc_address
-        .from_base58()
-        .expect("Unable to get bytes from btc address");
+    let addr_bytes = base58::decode(btc_address).expect("Unable to get bytes from btc address");
     let pox_addr_tuple = ClarityValue::Tuple(
         TupleData::from_data(vec![
             (

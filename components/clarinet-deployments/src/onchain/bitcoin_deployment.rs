@@ -1,6 +1,5 @@
 use std::str::FromStr;
 
-use base58::FromBase58;
 use bitcoin::absolute::LockTime;
 use bitcoin::blockdata::opcodes;
 use bitcoin::blockdata::script::Builder;
@@ -10,7 +9,7 @@ use bitcoin::script::PushBytes;
 use bitcoin::sighash::SighashCache;
 use bitcoin::transaction::Version;
 use bitcoin::{
-    Amount, OutPoint, PubkeyHash, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
+    base58, Amount, OutPoint, PubkeyHash, ScriptBuf, Sequence, Transaction, TxIn, TxOut, Witness,
 };
 use bitcoincore_rpc::bitcoin::secp256k1::{Message, PublicKey, Secp256k1, SecretKey};
 use bitcoincore_rpc::bitcoin::Address;
@@ -76,10 +75,8 @@ pub fn build_transaction_spec(
     transaction.output.push(txout);
 
     // Prepare Sender change output
-    let sender_pub_key_hash = tx_spec
-        .expected_sender
-        .from_base58()
-        .expect("Unable to get bytes sender btc address");
+    let sender_pub_key_hash =
+        base58::decode(&tx_spec.expected_sender).expect("Unable to get bytes sender btc address");
 
     let pubkey_hash = PubkeyHash::from_slice(&sender_pub_key_hash[1..21]).expect("Invalid hash");
 

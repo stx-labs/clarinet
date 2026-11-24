@@ -193,7 +193,7 @@ impl DevnetOrchestrator {
             .or_else(|_| Docker::connect_with_socket_defaults())
             .or_else(|_| {
                 let mut user_space_docker_socket =
-                    dirs::home_dir().expect("unable to retrieve homedir");
+                    std::env::home_dir().expect("unable to retrieve homedir");
                 user_space_docker_socket.push(".docker");
                 user_space_docker_socket.push("run");
                 user_space_docker_socket.push("docker.sock");
@@ -2110,7 +2110,7 @@ async fn register_descriptor(
 }
 
 pub fn get_snapshot_cache_root() -> PathBuf {
-    let home_dir = dirs::home_dir().expect("Unable to retrieve home dir");
+    let home_dir = std::env::home_dir().expect("Unable to retrieve home dir");
     home_dir.join(".clarinet").join("cache").join("devnet")
 }
 

@@ -41,9 +41,8 @@ impl CLIDebugger {
         context: &LocalContext,
         expr: &SymbolicExpression,
     ) {
-        let prompt = black!("(debug) ");
         loop {
-            let readline = self.editor.readline(&prompt);
+            let readline = self.editor.readline("(debug) ");
             let resume = match readline {
                 Ok(mut command) => {
                     if command.is_empty() {
