@@ -56,7 +56,6 @@ colored = "3"
 console_error_panic_hook = "0.1"
 crossbeam-channel = "0.5.6"
 crossterm = "0.29.0"
-dirs = "7.0.0"
 divan = "0.1"
 futures = "0.3.12"
 getrandom = { version = "0.3", features = ["wasm_js"] }

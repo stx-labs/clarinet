@@ -1,11 +1,14 @@
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::{Session, SessionSettings};
-use pico_args::Arguments;
 
 fn main() {
-    let mut args = Arguments::from_env();
-    let _subcommand = args.subcommand().unwrap().unwrap_or_default();
-    let code = args.subcommand().unwrap();
+    // Positional arguments end at the first flag
+    let mut args = std::env::args_os()
+        .skip(1)
+        .map(|arg| arg.into_string().expect("non-UTF-8 argument"))
+        .take_while(|arg| !arg.starts_with('-'));
+    let _subcommand = args.next();
+    let code = args.next();
 
     let settings = SessionSettings::default();
 

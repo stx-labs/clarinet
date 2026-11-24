@@ -9,7 +9,6 @@ edition = "2021"
 bitcoincore-rpc = { workspace= true }
 bollard = "0.21"
 colored = { workspace = true }
-dirs = { workspace = true }
 serde = { workspace = true, features = ["derive", "rc"] }
 serde_json = { workspace = true, features = ["preserve_order", "arbitrary_precision"] }
 reqwest = { workspace = true, features = ["blocking"] }
