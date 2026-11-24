@@ -1003,6 +1003,109 @@ fn test_check_single_file_ignores_invalid_implicit_manifest() {
     );
 }
 
+#[test]
+fn test_check_single_file_reports_removed_analysis_settings() {
+    for explicit_manifest in [false, true] {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manifest_name = if explicit_manifest {
+            "legacy.toml"
+        } else {
+            "Clarinet.toml"
+        };
+        let manifest_path = temp_dir.path().canonicalize().unwrap().join(manifest_name);
+        fs::write(
+            &manifest_path,
+            "[project]\nname = \"legacy\"\n[repl.analysis.lint_groups]\nall = false\n",
+        )
+        .unwrap();
+        let sub_dir = temp_dir.path().join("sub");
+        fs::create_dir(&sub_dir).unwrap();
+        fs::write(
+            sub_dir.join("standalone.clar"),
+            "(define-constant UNUSED u1)\n",
+        )
+        .unwrap();
+
+        for format in ["standard", "json", "json-pretty"] {
+            let mut command = Command::new(env!("CARGO_BIN_EXE_clarinet"));
+            command.args(["check", "standalone.clar", "--output", format]);
+            if explicit_manifest {
+                command.arg("--manifest-path").arg(&manifest_path);
+            }
+            let output = command
+                .env("NO_COLOR", "1")
+                .current_dir(&sub_dir)
+                .output()
+                .unwrap();
+            let stdout = String::from_utf8_lossy(&output.stdout);
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{stdout}\n{stderr}");
+            let warning = "[repl.analysis] is no longer supported";
+            if format == "standard" {
+                assert_eq!(stderr.matches(warning).count(), 1, "{stderr}");
+                assert!(!stdout.contains(warning), "{stdout}");
+                assert!(stdout.contains("warning[unused_const]"), "{stdout}");
+            } else {
+                assert!(!stderr.contains(warning), "{stderr}");
+                let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+                assert_eq!(json["success"], true);
+                let manifest_diags = json["diagnostics"][manifest_path.to_str().unwrap()]
+                    .as_array()
+                    .expect("manifest diagnostics must be keyed by the manifest path");
+                assert_eq!(manifest_diags.len(), 1, "{json}");
+                assert_eq!(manifest_diags[0]["level"], "Warning");
+                let message = manifest_diags[0]["message"].as_str().unwrap();
+                assert!(message.contains(warning), "{message}");
+                assert!(message.contains("[linter.groups]"), "{message}");
+                assert!(
+                    collect_lint_names(&json).contains(&(Some("unused_const"), "Warning")),
+                    "{json}"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn test_check_show_lints_reports_removed_analysis_settings() {
+    for explicit_manifest in [false, true] {
+        let temp_dir = tempfile::tempdir().unwrap();
+        let manifest_name = if explicit_manifest {
+            "legacy.toml"
+        } else {
+            "Clarinet.toml"
+        };
+        let manifest_path = temp_dir.path().join(manifest_name);
+        fs::write(
+            &manifest_path,
+            "[project]\nname = \"legacy\"\n[repl.analysis.lint_groups]\nall = false\n",
+        )
+        .unwrap();
+        let sub_dir = temp_dir.path().join("sub");
+        fs::create_dir(&sub_dir).unwrap();
+        let mut command = Command::new(env!("CARGO_BIN_EXE_clarinet"));
+        command.args(["check", "--show-lints"]);
+        if explicit_manifest {
+            command.arg("--manifest-path").arg(&manifest_path);
+        }
+        let output = command
+            .env("NO_COLOR", "1")
+            .current_dir(&sub_dir)
+            .output()
+            .unwrap();
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(output.status.success(), "{stdout}\n{stderr}");
+        let warning = "[repl.analysis] is no longer supported";
+        assert_eq!(stderr.matches(warning).count(), 1, "{stderr}");
+        assert!(stderr.contains("[linter.groups]"), "{stderr}");
+        assert!(!stdout.contains(warning), "{stdout}");
+        assert!(stdout.contains("Lint groups:"), "{stdout}");
+        let active = stdout.split("Active lint configuration:").nth(1).unwrap();
+        assert!(active.contains("unused_const"), "{stdout}");
+    }
+}
+
 /// Devnet deployments should strip `#[env(simnet)]` code from contract sources.
 /// This tests the fix for https://github.com/hirosystems/clarinet/issues/2338.
 #[test]

@@ -1284,35 +1284,44 @@ pub fn main() {
         }
         Command::Check(cmd) if cmd.show_lints => {
             let settings = load_manifest_or_warn(cmd.manifest_path)
-                .map(|m| m.repl_settings.analysis)
+                .map(|manifest| {
+                    display_manifest_diagnostics(&manifest);
+                    manifest.repl_settings.analysis
+                })
                 .unwrap_or_else(analysis::Settings::with_default_lints);
             print_available_lints(&settings);
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
             // An explicit manifest must load. A manifest found by search is optional.
-            let analysis = match cmd.manifest_path {
-                Some(path) => {
-                    load_manifest_or_exit(Some(path), false)
-                        .repl_settings
-                        .analysis
-                }
-                None => get_manifest_location(None)
-                    .and_then(|location| {
-                        ProjectManifest::from_location(&location, false)
-                            .inspect_err(|message| {
-                                eprintln!(
-                                    "{} unable to load {}, using default lints",
-                                    yellow!("warning:"),
-                                    location.display()
-                                );
-                                eprintln!("{message}");
-                            })
-                            .ok()
-                    })
-                    .map(|manifest| manifest.repl_settings.analysis)
-                    .unwrap_or_else(analysis::Settings::with_default_lints),
+            let manifest = match cmd.manifest_path {
+                Some(path) => Some(load_manifest_or_exit(Some(path), false)),
+                None => get_manifest_location(None).and_then(|location| {
+                    ProjectManifest::from_location(&location, false)
+                        .inspect_err(|message| {
+                            eprintln!(
+                                "{} unable to load {}, using default lints",
+                                yellow!("warning:"),
+                                location.display()
+                            );
+                            eprintln!("{message}");
+                        })
+                        .ok()
+                }),
             };
+            if cmd.output_format == OutputFormat::Standard {
+                if let Some(manifest) = &manifest {
+                    display_manifest_diagnostics(manifest);
+                }
+            }
+            let (analysis, manifest_diagnostics) = manifest
+                .map(|manifest| {
+                    (
+                        manifest.repl_settings.analysis,
+                        Some((manifest.location, manifest.diagnostics)),
+                    )
+                })
+                .unwrap_or_else(|| (analysis::Settings::with_default_lints(), None));
             let settings = repl::SessionSettings {
                 repl_settings: repl::Settings {
                     analysis,
@@ -1367,9 +1376,18 @@ pub fn main() {
                     let mut all_diags: Vec<LintDiagnostic> =
                         diagnostics.into_iter().map(LintDiagnostic::from).collect();
                     all_diags.extend(lint_diagnostics);
+                    let mut diagnostics = HashMap::from([(file, all_diags)]);
+                    if let Some((location, manifest_diagnostics)) = manifest_diagnostics {
+                        if !manifest_diagnostics.is_empty() {
+                            diagnostics
+                                .entry(location.to_string_lossy().into_owned())
+                                .or_default()
+                                .extend(manifest_diagnostics.into_iter().map(LintDiagnostic::from));
+                        }
+                    }
                     let output = JsonCheckOutput {
                         success,
-                        diagnostics: HashMap::from([(file, all_diags)]),
+                        diagnostics,
                         environment: Environment::Simnet.to_string(),
                     };
                     let json = if cmd.output_format == OutputFormat::JsonPretty {

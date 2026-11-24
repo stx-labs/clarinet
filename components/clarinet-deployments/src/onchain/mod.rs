@@ -311,8 +311,7 @@ fn public_network_epoch(
     {
         stacks_rpc
             .get_pox_info()
-            .and_then(|pox| pox.active_epoch())
-            .map(Some)
+            .map(|pox| Some(pox.current_epoch))
             .map_err(|e| format!("unable to determine target network epoch: {e}"))
     } else {
         Ok(None)
@@ -1147,6 +1146,7 @@ mod tests {
             "pox_activation_threshold_ustx": 0,
             "first_burnchain_block_height": 0,
             "current_burnchain_block_height": 200,
+            "current_epoch": epoch,
             "prepare_phase_block_length": 50,
             "reward_phase_block_length": 100,
             "reward_slots": 1,
@@ -1155,7 +1155,10 @@ mod tests {
             "total_liquid_supply_ustx": 0,
             "current_cycle": {"id": 1, "min_threshold_ustx": 0, "stacked_ustx": 0, "is_pox_active": true},
             "next_cycle": {"min_threshold_ustx": 0, "stacked_ustx": 0, "blocks_until_prepare_phase": 1, "blocks_until_reward_phase": 2},
-            "epochs": [{"epoch_id": epoch, "start_height": 100, "end_height": 300}]
+            "epochs": [
+                {"epoch_id": epoch, "start_height": 100, "end_height": 300},
+                {"epoch_id": "Epoch42", "start_height": 300, "end_height": 400}
+            ]
         })
     }
 
@@ -1318,27 +1321,27 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unknown_or_uncovered_target_epoch_schedule() {
+    fn rejects_unknown_or_missing_current_epoch() {
         let mut response = pox_response(StacksEpochId::Epoch40);
-        response["current_burnchain_block_height"] = 300.into();
-        let pox: PoxInfo = serde_json::from_value(response.clone()).unwrap();
-        assert!(pox.active_epoch().is_err());
-        response["epochs"][0]["epoch_id"] = "Epoch42".into();
+        response["current_epoch"] = "Epoch42".into();
+        assert!(serde_json::from_value::<PoxInfo>(response.clone()).is_err());
+        response.as_object_mut().unwrap().remove("current_epoch");
         assert!(serde_json::from_value::<PoxInfo>(response).is_err());
     }
 
     #[test]
-    fn resolves_activation_height_and_staggered_public_networks() {
-        let mut testnet = pox_response(StacksEpochId::Epoch40);
+    fn uses_node_current_epoch_for_staggered_public_networks() {
+        let mut testnet = pox_response(StacksEpochId::Epoch41);
+        // The node's active epoch is authoritative, not the schedule or burn height.
         testnet["epochs"] = serde_json::json!([
-            {"epoch_id":"Epoch40", "start_height":100, "end_height":200},
-            {"epoch_id":"Epoch41", "start_height":200, "end_height":300}
+            {"epoch_id":"Epoch40", "start_height":100, "end_height":300},
+            {"epoch_id":"Epoch42", "start_height":300, "end_height":400}
         ]);
         let pox: PoxInfo = serde_json::from_value(testnet.clone()).unwrap();
-        assert_eq!(pox.active_epoch().unwrap(), StacksEpochId::Epoch41);
-        testnet["current_burnchain_block_height"] = 199.into();
+        assert_eq!(pox.current_epoch, StacksEpochId::Epoch41);
+        testnet["current_epoch"] = serde_json::json!(StacksEpochId::Epoch40);
         let pox: PoxInfo = serde_json::from_value(testnet).unwrap();
-        assert_eq!(pox.active_epoch().unwrap(), StacksEpochId::Epoch40);
+        assert_eq!(pox.current_epoch, StacksEpochId::Epoch40);
         assert_eq!(
             target_epoch(&StacksNetwork::Testnet, None, Some(StacksEpochId::Epoch41)),
             StacksEpochId::Epoch41

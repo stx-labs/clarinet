@@ -1,6 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
+use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 use clarinet_files::{paths, DevnetConfig, FileAccessor, StacksNetwork};
 use clarity::types::StacksEpochId;
 use clarity::util::hash::{hex_bytes, to_hex, Sha256Sum};
@@ -632,7 +633,15 @@ impl ContractPublishSpecification {
             .ok_or_else(|| format!("unable to parse path '{}'", specs.path))?;
 
         let source = paths::read_content_as_utf8(&location)?;
-        let clarity_version = try_clarity_version_from_option(specs.clarity_version, epoch)?;
+        // Saved versioned project publishes used this default regardless of the batch label.
+        let clarity_version = match specs.clarity_version {
+            None if epoch >= StacksEpochId::Epoch21
+                && !epoch.rejects_versioned_smart_contracts() =>
+            {
+                DEFAULT_CLARITY_VERSION
+            }
+            version => try_clarity_version_from_option(version, epoch)?,
+        };
 
         Ok(ContractPublishSpecification {
             contract_name,
@@ -1595,7 +1604,12 @@ mod tests {
             StacksNetwork::Testnet,
             StacksNetwork::Mainnet,
         ] {
-            for epoch in [None, Some(EpochSpec::Epoch4_0), Some(EpochSpec::Epoch4_1)] {
+            for epoch in [
+                None,
+                Some(EpochSpec::Epoch3_0),
+                Some(EpochSpec::Epoch4_0),
+                Some(EpochSpec::Epoch4_1),
+            ] {
                 let transaction = if network == StacksNetwork::Simnet {
                     TransactionSpecificationFile::EmulatedContractPublish(
                         EmulatedContractPublishSpecificationFile {
@@ -1642,11 +1656,11 @@ mod tests {
                     None,
                 )
                 .unwrap();
-                let expected = ClarityVersion::default_for_epoch(
-                    epoch
-                        .map(StacksEpochId::from)
-                        .unwrap_or_else(|| network.default_epoch()),
-                );
+                let expected = match (&network, epoch) {
+                    (StacksNetwork::Simnet, Some(EpochSpec::Epoch3_0)) => ClarityVersion::Clarity3,
+                    (_, Some(EpochSpec::Epoch4_1)) => ClarityVersion::Clarity7,
+                    _ => ClarityVersion::Clarity6,
+                };
                 let version = match &deployment.plan.batches[0].transactions[0] {
                     TransactionSpecification::ContractPublish(spec) => spec.clarity_version,
                     TransactionSpecification::EmulatedContractPublish(spec) => spec.clarity_version,

@@ -165,10 +165,12 @@ If a requirement is already deployed on the target network, you can use a remap
 to reference it. You then do not need to publish the old source again.
 
 Clarinet keeps a separate default epoch for mainnet and for testnet. At this
-time, both default to epoch 4.0 and Clarity 6. A public deployment uses the
-epoch schedule of the connected node. It does not use an earlier epoch label
-from a saved plan. If the network activates a new epoch during a deployment,
-check the plan again and generate a new plan.
+time, both default to epoch 4.0 and Clarity 6. For public deployments, the node's
+active epoch determines the publish format. Saved `contract-publish` entries
+from epochs 2.1 through 4.0 that omit `clarity-version` keep their legacy
+Clarity 6 default. Pin the version explicitly when editing a plan by hand.
+If the network activates a new epoch during a deployment, check the plan again
+and generate a new plan.
 
 ## Contributing
 
