@@ -545,7 +545,8 @@ pub async fn start_chains_coordinator(
                 if !boot_completed.load(Ordering::SeqCst) {
                     let snapshot_target_height = config
                         .devnet_config
-                        .epoch_4_0
+                        .epoch_4_1
+                        .or(config.devnet_config.epoch_4_0)
                         .unwrap_or(config.devnet_config.epoch_3_0);
                     if snapshot_target_height.saturating_sub(current_burn_height) > 6 {
                         std::thread::sleep(std::time::Duration::from_millis(750));

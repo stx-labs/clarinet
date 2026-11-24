@@ -931,7 +931,7 @@ impl Session {
             return Err(ExecutionError::rejected(vec![diagnostic]));
         }
 
-        if contract.clarity_version > ClarityVersion::default_for_epoch(contract.epoch.resolve()) {
+        if !super::is_deployable_clarity_version(contract.clarity_version, current_epoch) {
             let diagnostic = Diagnostic {
                 level: Level::Error,
                 message: bounded_format!(
@@ -1558,7 +1558,7 @@ impl Session {
         let epoch = match cmd.split_once(' ').and_then(|(_, epoch)| super::epoch_from_str(epoch)) {
             Some(epoch) => epoch,
             None => {
-                return Err("Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4 | 4.0"
+                return Err("Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4 | 4.0 | 4.1"
                     .red()
                     .to_string())
             }
@@ -2236,33 +2236,21 @@ mod tests {
             initial_block_height + 1
         );
 
-        // The latest epoch clarinet supports, which deliberately trails
-        // `StacksEpochId::latest()` until an epoch is adopted here — adoption
-        // means `epoch_from_str`, `EpochSpec`, and the devnet config, not just
-        // the interpreter.
+        // The deterministic default need not be the newest supported epoch.
         let supported_latest = DEFAULT_EPOCH.to_string();
         session.handle_command(&format!("::set_epoch {supported_latest}"));
         let current_epoch = session.handle_command("::get_epoch");
         assert_eq!(current_epoch, format!("Current epoch: {supported_latest}"));
 
-        // Canary for upstream adding an epoch. Clarinet supports through 4.0;
-        // 4.1 exists upstream but is not adopted here. If this fails, upstream
-        // has moved again — adopt the pending epoch, or re-pin this and say why.
-        assert_eq!(
-            StacksEpochId::ALL.last(),
-            Some(&StacksEpochId::Epoch41),
-            "upstream added an epoch past the one clarinet knows is pending"
-        );
-
-        // An unadopted epoch is reported as unusable rather than silently
-        // ignored, so the session never lands somewhere the caller didn't ask for.
-        let result = session.handle_command("::set_epoch 4.1");
+        assert_eq!(StacksEpochId::ALL.last(), Some(&StacksEpochId::Epoch41));
+        session.handle_command("::set_epoch 4.1");
+        assert_eq!(session.handle_command("::get_epoch"), "Current epoch: 4.1");
+        let result = session.handle_command("::set_epoch 4.2");
         assert!(
             result.contains("Usage:"),
             "expected usage error, got: {result}"
         );
-        let current_epoch = session.handle_command("::get_epoch");
-        assert_eq!(current_epoch, format!("Current epoch: {supported_latest}"));
+        assert_eq!(session.handle_command("::get_epoch"), "Current epoch: 4.1");
     }
 
     #[test]

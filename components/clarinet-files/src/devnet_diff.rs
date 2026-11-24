@@ -106,6 +106,15 @@ impl DevnetDiffConfig {
                         .unwrap_or_else(|| "none".to_string())
                 }),
             },
+            SignificantField {
+                name: "epoch_4_1".to_string(),
+                extractor: make_extractor(|config| {
+                    config
+                        .epoch_4_1
+                        .map(|height| height.to_string())
+                        .unwrap_or_else(|| "none".to_string())
+                }),
+            },
             // Signers
             SignificantField {
                 name: "stacks_signers_keys".to_string(),
@@ -283,6 +292,17 @@ mod tests {
         let incompatibles = different_fields.unwrap_err();
         assert_eq!(incompatibles[0].0, "epoch_3_0");
         assert_eq!(incompatibles[1].0, "start_at_cycle");
+    }
+
+    #[test]
+    fn epoch_4_1_schedule_invalidates_historical_snapshot() {
+        let config = DevnetConfig {
+            epoch_4_1: Some(200),
+            ..DevnetConfig::default()
+        };
+        let differences = DevnetDiffConfig::new().is_compatible(&config).unwrap_err();
+        assert_eq!(differences.len(), 1);
+        assert_eq!(differences[0].0, "epoch_4_1");
     }
 
     #[test]

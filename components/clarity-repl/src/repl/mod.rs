@@ -62,6 +62,17 @@ pub fn clarity_version_from_u32(value: u32) -> Option<ClarityVersion> {
     u8::try_from(value).ok().and_then(clarity_version_from_u8)
 }
 
+/// Whether a new contract can be published at `version` in `epoch`. Epochs that
+/// reject versioned deploys accept only the epoch default.
+pub fn is_deployable_clarity_version(version: ClarityVersion, epoch: StacksEpochId) -> bool {
+    let epoch_default = ClarityVersion::default_for_epoch(epoch);
+    if epoch.rejects_versioned_smart_contracts() {
+        version == epoch_default
+    } else {
+        version <= epoch_default
+    }
+}
+
 /// Parse a human-readable epoch string (e.g. "3.4") into a StacksEpochId.
 /// Accepts aliases "2" for "2.0" and "3" for "3.0".
 pub fn epoch_from_str(s: &str) -> Option<StacksEpochId> {
@@ -79,6 +90,7 @@ pub fn epoch_from_str(s: &str) -> Option<StacksEpochId> {
         "3.3" => Some(StacksEpochId::Epoch33),
         "3.4" => Some(StacksEpochId::Epoch34),
         "4" | "4.0" => Some(StacksEpochId::Epoch40),
+        "4.1" => Some(StacksEpochId::Epoch41),
         _ => None,
     }
 }
@@ -139,12 +151,11 @@ impl<'de> serde::Deserialize<'de> for Epoch {
             where
                 E: serde::de::Error,
             {
-                if value == "latest" {
-                    Ok(Epoch::Latest)
-                } else {
-                    Err(serde::de::Error::custom(format!(
-                        "unknown epoch value: {value}"
-                    )))
+                match value {
+                    "latest" => Ok(Epoch::Latest),
+                    _ => epoch_from_str(value).map(Epoch::Specific).ok_or_else(|| {
+                        serde::de::Error::custom(format!("unknown epoch value: {value}"))
+                    }),
                 }
             }
 
@@ -168,6 +179,7 @@ impl<'de> serde::Deserialize<'de> for Epoch {
                     3.3 => StacksEpochId::Epoch33,
                     3.4 => StacksEpochId::Epoch34,
                     4.0 => StacksEpochId::Epoch40,
+                    4.1 => StacksEpochId::Epoch41,
                     _ => {
                         return Err(serde::de::Error::custom(format!(
                             "unknown epoch value: {value}"
@@ -330,5 +342,25 @@ mod tests {
         assert_eq!(clarity_version_from_u32(1), Some(ClarityVersion::Clarity1));
         assert_eq!(clarity_version_from_u32(257), None);
         assert_eq!(clarity_version_from_u32(0), None);
+    }
+
+    #[test]
+    fn epoch_4_1_round_trips_without_changing_latest() {
+        use super::{epoch_from_str, Epoch, StacksEpochId, DEFAULT_EPOCH};
+
+        assert_eq!(epoch_from_str("4.1"), Some(StacksEpochId::Epoch41));
+        let epoch = Epoch::Specific(StacksEpochId::Epoch41);
+        let encoded = serde_json::to_string(&epoch).unwrap();
+        assert_eq!(encoded, "\"4.1\"");
+        assert_eq!(serde_json::from_str::<Epoch>(&encoded).unwrap(), epoch);
+        assert_eq!(
+            <Epoch as serde::Deserialize>::deserialize(serde::de::value::F64Deserializer::<
+                serde::de::value::Error,
+            >::new(4.1),)
+            .unwrap(),
+            epoch,
+        );
+        assert_eq!(Epoch::Latest.resolve(), DEFAULT_EPOCH);
+        assert_eq!(DEFAULT_EPOCH, StacksEpochId::Epoch40);
     }
 }

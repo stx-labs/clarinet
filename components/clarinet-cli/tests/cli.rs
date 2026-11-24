@@ -60,6 +60,89 @@ fn create_new_project(project_name: &str) -> tempfile::TempDir {
 }
 
 #[test]
+fn deployment_warnings_are_once_per_contract_across_check_environments() {
+    let (_temp, project) = create_project_with_env_simnet("deployment_warnings");
+    let manifest_path = project.join("Clarinet.toml");
+    let mut manifest = fs::read_to_string(&manifest_path).unwrap();
+    manifest.push_str(indoc! {r#"
+
+        [contracts.historical]
+        path = "contracts/historical.clar"
+        epoch = "2.1"
+
+        [contracts.latest]
+        path = "contracts/latest.clar"
+        epoch = "4.1"
+        clarity_version = 7
+    "#});
+    fs::write(manifest_path, manifest).unwrap();
+    for name in ["historical", "latest"] {
+        fs::write(
+            project.join(format!("contracts/{name}.clar")),
+            "(define-read-only (get-value) u1)",
+        )
+        .unwrap();
+    }
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["check", "--use-computed-deployment-plan"])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stdout}\n{stderr}");
+    assert!(stdout.contains("Checking contracts with #[env(simnet)]"));
+    assert!(stdout.contains("Checking contracts without #[env(simnet)]"));
+    assert_eq!(
+        stderr.matches("cannot be newly deployed").count(),
+        2,
+        "{stderr}"
+    );
+    for name in ["historical", "my-contract"] {
+        assert_eq!(
+            stderr.matches(&format!("Contract `{name}`")).count(),
+            1,
+            "{stderr}"
+        );
+    }
+    assert!(!stderr.contains("Contract `latest`"), "{stderr}");
+    assert!(!stdout.contains("cannot be newly deployed"), "{stdout}");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args([
+            "check",
+            "--output",
+            "json",
+            "--use-computed-deployment-plan",
+        ])
+        .current_dir(&project)
+        .output()
+        .unwrap();
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(output.status.success(), "{stdout}\n{stderr}");
+    let reports: Vec<serde_json::Value> = serde_json::Deserializer::from_str(&stdout)
+        .into_iter()
+        .map(Result::unwrap)
+        .collect();
+    assert_eq!(reports.len(), 2, "{stdout}");
+    let warnings = reports
+        .iter()
+        .flat_map(|report| report["diagnostics"].as_object().unwrap().values())
+        .flat_map(|diagnostics| diagnostics.as_array().unwrap())
+        .filter(|diagnostic| {
+            diagnostic["message"]
+                .as_str()
+                .unwrap()
+                .contains("cannot be newly deployed")
+        })
+        .count();
+    assert_eq!(warnings, 2, "{stdout}");
+    assert!(!stderr.contains("cannot be newly deployed"), "{stderr}");
+}
+
+#[test]
 fn test_new_project() {
     let project_name = "test_project";
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");

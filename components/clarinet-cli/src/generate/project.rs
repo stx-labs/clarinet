@@ -379,6 +379,7 @@ impl GetChangesForNewProject {
             # epoch_3_3 = {DEFAULT_EPOCH_3_3}
             # epoch_3_4 = {DEFAULT_EPOCH_3_4}
             # epoch_4_0 = {DEFAULT_EPOCH_4_0}
+            # epoch_4_1 = 164 # opt in to epoch 4.1 (Clarity 7 for new contracts)
 
             # Send some stacking orders
             [[devnet.pox_stacking_orders]]

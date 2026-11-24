@@ -15,7 +15,8 @@ const EPOCH_STRING: &'static str = r#"export type EpochString =
   | "3.2"
   | "3.3"
   | "3.4"
-  | "4.0";
+  | "4.0"
+  | "4.1";
 "#;
 
 // CONTRACT AST
@@ -162,7 +163,8 @@ const STACKS_EPOCH_ID_STRING: &'static str = r#"export type StacksEpochId =
   | "Epoch32"
   | "Epoch33"
   | "Epoch34"
-  | "Epoch40";"#;
+  | "Epoch40"
+  | "Epoch41";"#;
 
 #[wasm_bindgen(typescript_custom_section)]
 const CLARITY_VERSION_STRING: &'static str = r#"export type ClarityVersionString = "Clarity1" | "Clarity2" | "Clarity3"| "Clarity4" | "Clarity5" | "Clarity6" | "Clarity7";"#;

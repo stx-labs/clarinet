@@ -796,6 +796,7 @@ pub fn main() {
             }
             Deployments::GenerateDeployment(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
+                display_manifest_diagnostics(&manifest);
 
                 let network = if cmd.devnet {
                     StacksNetwork::Devnet
@@ -892,6 +893,7 @@ pub fn main() {
             }
             Deployments::ApplyDeployment(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
+                display_manifest_diagnostics(&manifest);
 
                 let network = if cmd.devnet {
                     Some(StacksNetwork::Devnet)
@@ -1421,6 +1423,12 @@ pub fn main() {
         }
         Command::Check(cmd) => {
             let manifest = load_manifest_or_exit(cmd.manifest_path, false);
+            let mut manifest_diagnostics = if cmd.output_format == OutputFormat::Standard {
+                display_manifest_diagnostics(&manifest);
+                Vec::new()
+            } else {
+                manifest.diagnostics.clone()
+            };
             let mut exit_codes = Vec::new();
             let mut global_found_env_simnet = false;
             for environment in CHECK_ENVIRONMENTS {
@@ -1453,6 +1461,16 @@ pub fn main() {
                             if let Some(lds) = artifacts.lint_diags.remove(&contract_id) {
                                 entry.extend(lds);
                             }
+                        }
+                        if !manifest_diagnostics.is_empty() {
+                            diagnostics
+                                .entry(manifest.location.to_string_lossy().into_owned())
+                                .or_default()
+                                .extend(
+                                    std::mem::take(&mut manifest_diagnostics)
+                                        .into_iter()
+                                        .map(LintDiagnostic::from),
+                                );
                         }
                         let environment = environment.to_string();
                         let output = JsonCheckOutput {
@@ -1768,6 +1786,15 @@ fn get_manifest_location_or_warn(path: Option<String>) -> Option<PathBuf> {
                 yellow!("note:")
             );
             None
+        }
+    }
+}
+
+fn display_manifest_diagnostics(manifest: &ProjectManifest) {
+    let name = manifest.location.to_string_lossy();
+    for diagnostic in &manifest.diagnostics {
+        for line in output_diagnostic(&LintDiagnostic::from(diagnostic.clone()), &name, &[]) {
+            eprintln!("{line}");
         }
     }
 }
@@ -2459,6 +2486,7 @@ fn display_deploy_hint() {
 
 fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let manifest = load_manifest_or_exit(cmd.manifest_path, false);
+    display_manifest_diagnostics(&manifest);
     let project_root = &manifest.root_dir;
     println!("Computing deployment plan");
     let result = match cmd.deployment_plan_path {

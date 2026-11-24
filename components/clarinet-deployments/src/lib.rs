@@ -1808,6 +1808,57 @@ mod tests {
 
     static DEPLOYER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
 
+    #[test]
+    fn historical_contract_survives_epoch_41_without_allowing_old_new_deploys() {
+        let mut session = Session::new(SessionSettings::default());
+        session.update_epoch(StacksEpochId::Epoch40);
+        let mut spec = EmulatedContractPublishSpecification {
+            contract_name: ContractName::try_from("historical").unwrap(),
+            emulated_sender: PrincipalData::parse_standard_principal(DEPLOYER).unwrap(),
+            source: "(define-read-only (get-value) u1)".into(),
+            clarity_version: ClarityVersion::Clarity2,
+            location: "historical.clar".into(),
+            skip_analysis: false,
+            remap_principals: BTreeMap::new(),
+        };
+        handle_emulated_contract_publish(&mut session, &spec, None, StacksEpochId::Epoch40)
+            .unwrap();
+        session.advance_chain_tip(1);
+        session.update_epoch(StacksEpochId::Epoch41);
+        let result = session
+            .eval(
+                format!("(contract-call? '{DEPLOYER}.historical get-value)"),
+                false,
+            )
+            .unwrap();
+        let EvaluationResult::Snippet(value) = result.into_inner().result else {
+            panic!("expected a call result");
+        };
+        assert_eq!(value.result, Value::UInt(1));
+
+        spec.contract_name = ContractName::try_from("new-old-version").unwrap();
+        spec.skip_analysis = true;
+        let errors =
+            handle_emulated_contract_publish(&mut session, &spec, None, StacksEpochId::Epoch41)
+                .unwrap_err();
+        assert!(errors[0].diagnostic.message.contains("Clarity 2"));
+        assert!(errors[0].diagnostic.message.contains("4.1"));
+        spec.contract_name = ContractName::try_from("new-latest-version").unwrap();
+        spec.clarity_version = ClarityVersion::Clarity7;
+        handle_emulated_contract_publish(&mut session, &spec, None, StacksEpochId::Epoch41)
+            .unwrap();
+        let result = session
+            .eval(
+                format!("(contract-call? '{DEPLOYER}.new-latest-version get-value)"),
+                false,
+            )
+            .unwrap();
+        let EvaluationResult::Snippet(value) = result.into_inner().result else {
+            panic!("expected a call result");
+        };
+        assert_eq!(value.result, Value::UInt(1));
+    }
+
     fn deploy_contract(
         session: &mut Session,
         name: &str,

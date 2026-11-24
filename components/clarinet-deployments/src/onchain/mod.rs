@@ -2,18 +2,18 @@ use std::collections::{BTreeMap, VecDeque};
 use std::sync::mpsc::{Receiver, Sender};
 
 use bitcoincore_rpc::{Auth, Client};
-use clarinet_defaults::DEFAULT_EPOCH;
-use clarinet_files::{AccountConfig, NetworkManifest, StacksNetwork};
+use clarinet_files::{AccountConfig, DevnetConfig, NetworkManifest, StacksNetwork};
 use clarinet_utils::get_bip32_keys_from_mnemonic;
 use clarity::codec::StacksMessageCodec;
 use clarity::types::chainstate::StacksAddress;
+use clarity::types::StacksEpochId;
 use clarity::util::secp256k1::{MessageSignature, Secp256k1PrivateKey, Secp256k1PublicKey};
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityName, ClarityVersion, ContractName, EvaluationResult, Value};
 use clarity_repl::repl::boot::{
     remap_mainnet_boot_principals, SBTC_CONTRACTS_NAMES, SBTC_MAINNET_ADDRESS, SBTC_TESTNET_ADDRESS,
 };
-use clarity_repl::repl::{Session, SessionSettings};
+use clarity_repl::repl::{is_deployable_clarity_version, Session, SessionSettings};
 use reqwest::Url;
 use stacks_codec::strings::StacksString;
 use stacks_codec::transaction::{
@@ -24,12 +24,13 @@ use stacks_codec::transaction::{
 };
 use stacks_rpc_client::crypto::compute_stacks_address;
 use stacks_rpc_client::StacksRpc;
+use strum::IntoEnumIterator;
 
 mod bitcoin_deployment;
 
 use crate::source_remap::{qualify_remapped_relative_references, remap_contract_ids};
 use crate::types::{
-    remap_principal_pairs, ContractRemaps, DeploymentSpecification, EpochSpec,
+    planned_batch_epoch, remap_principal_pairs, ContractRemaps, DeploymentSpecification, EpochSpec,
     RequirementPublishSpecification, TransactionSpecification,
 };
 
@@ -271,6 +272,78 @@ pub enum DeploymentCommand {
     Start,
 }
 
+fn publish_clarity_version(
+    version: ClarityVersion,
+    epoch: StacksEpochId,
+) -> Result<Option<ClarityVersion>, String> {
+    if !is_deployable_clarity_version(version, epoch) {
+        let epoch_default = ClarityVersion::default_for_epoch(epoch);
+        return Err(format!(
+            "cannot publish {version} in epoch {epoch}; the target uses {epoch_default}. \
+             Test the contract under the target Clarity version, update the manifest, and regenerate the deployment plan"
+        ));
+    }
+    // Before 2.1 there is no versioned payload; later epochs may reject one.
+    Ok(
+        (epoch >= StacksEpochId::Epoch21 && !epoch.rejects_versioned_smart_contracts())
+            .then_some(version),
+    )
+}
+
+fn public_network_epoch(
+    deployment: &DeploymentSpecification,
+    stacks_rpc: &StacksRpc,
+) -> Result<Option<StacksEpochId>, String> {
+    let has_publishes = deployment.plan.batches.iter().any(|batch| {
+        batch.transactions.iter().any(|tx| {
+            matches!(
+                tx,
+                TransactionSpecification::ContractPublish(_)
+                    | TransactionSpecification::RequirementPublish(_)
+            )
+        })
+    });
+    if has_publishes
+        && matches!(
+            deployment.network,
+            StacksNetwork::Mainnet | StacksNetwork::Testnet
+        )
+    {
+        stacks_rpc
+            .get_pox_info()
+            .and_then(|pox| pox.active_epoch())
+            .map(Some)
+            .map_err(|e| format!("unable to determine target network epoch: {e}"))
+    } else {
+        Ok(None)
+    }
+}
+
+fn target_epoch(
+    network: &StacksNetwork,
+    batch_epoch: Option<EpochSpec>,
+    live_epoch: Option<StacksEpochId>,
+) -> StacksEpochId {
+    let planned = planned_batch_epoch(batch_epoch, network);
+    match (network, live_epoch) {
+        (StacksNetwork::Devnet, Some(active)) => planned.max(active),
+        (_, Some(active)) => active,
+        (_, None) => planned,
+    }
+}
+
+fn devnet_epoch(config: &DevnetConfig, height: u64) -> StacksEpochId {
+    EpochSpec::iter()
+        .filter(|epoch| {
+            epoch
+                .start_height(config)
+                .is_some_and(|start| start <= height)
+        })
+        .map(StacksEpochId::from)
+        .max()
+        .unwrap_or(StacksEpochId::Epoch20)
+}
+
 pub fn update_deployment_costs(
     deployment: &mut DeploymentSpecification,
     priority: usize,
@@ -281,8 +354,10 @@ pub fn update_deployment_costs(
         .expect("unable to get stacks node rcp address");
     let stacks_rpc = StacksRpc::new(stacks_node_url);
     let mut session = Session::new(SessionSettings::default());
+    let live_epoch = public_network_epoch(deployment, &stacks_rpc)?;
 
     for batch_spec in deployment.plan.batches.iter_mut() {
+        let epoch = target_epoch(&deployment.network, batch_spec.epoch, live_epoch);
         for transaction in batch_spec.transactions.iter_mut() {
             match transaction {
                 TransactionSpecification::StxTransfer(tx) => {
@@ -339,7 +414,8 @@ pub fn update_deployment_costs(
                             name: tx.contract_name.clone(),
                             code_body: StacksString::from_str(&tx.source).unwrap(),
                         },
-                        None,
+                        publish_clarity_version(tx.clarity_version, epoch)
+                            .map_err(|e| format!("{}: {e}", tx.contract_name))?,
                     );
 
                     match stacks_rpc.estimate_transaction_fee(&transaction_payload, priority) {
@@ -426,6 +502,41 @@ fn encode_transactions(
     deployment_event_tx: &Sender<DeploymentEvent>,
 ) -> Result<VecDeque<(EpochSpec, Vec<TransactionTracker>)>, String> {
     wait_for_node(stacks_rpc)?;
+    let devnet = match deployment.network {
+        StacksNetwork::Devnet => Some(
+            network_manifest
+                .devnet
+                .as_ref()
+                .ok_or("missing devnet epoch schedule")?,
+        ),
+        _ => None,
+    };
+    let live_epoch = match devnet {
+        Some(config) => {
+            let height = stacks_rpc
+                .get_info()
+                .map_err(|e| format!("unable to read devnet burn height: {e}"))?
+                .burn_block_height;
+            Some(devnet_epoch(config, height))
+        }
+        None => public_network_epoch(deployment, stacks_rpc)?,
+    };
+
+    // Validate every project publish before reading nonces or signing any transaction.
+    for batch in &deployment.plan.batches {
+        if let (Some(config), Some(epoch)) = (devnet, batch.epoch) {
+            if epoch.start_height(config).is_none() {
+                return Err(format!("devnet epoch {epoch:?} is not configured"));
+            }
+        }
+        let epoch = target_epoch(&deployment.network, batch.epoch, live_epoch);
+        for tx in &batch.transactions {
+            if let TransactionSpecification::ContractPublish(tx) = tx {
+                publish_clarity_version(tx.clarity_version, epoch)
+                    .map_err(|e| format!("{}: {e}", tx.contract_name))?;
+            }
+        }
+    }
 
     let network = &deployment.network;
     let stx_accounts_lookup: BTreeMap<&str, &AccountConfig> = network_manifest
@@ -446,7 +557,7 @@ fn encode_transactions(
     let mut next_index = 0;
 
     for batch_spec in deployment.plan.batches.iter() {
-        let epoch = batch_spec.epoch.unwrap_or_else(|| DEFAULT_EPOCH.into());
+        let epoch: EpochSpec = target_epoch(network, batch_spec.epoch, live_epoch).into();
         let mut batch = Vec::new();
         for transaction in batch_spec.transactions.iter() {
             if is_emulated(transaction) {
@@ -596,11 +707,8 @@ fn encode_transactions(
                         StacksNetwork::Simnet => tx.source.clone(),
                     };
 
-                    let clarity_version = if epoch >= EpochSpec::Epoch2_1 {
-                        Some(tx.clarity_version)
-                    } else {
-                        None
-                    };
+                    let clarity_version = publish_clarity_version(tx.clarity_version, epoch.into())
+                        .map_err(|e| format!("{}: {e}", tx.contract_name))?;
 
                     let transaction = encode_contract_publish(
                         &tx.contract_name,
@@ -646,6 +754,8 @@ fn encode_transactions(
                     if is_contract_published(stacks_rpc, &issuer_address, &tx.contract_id.name)? {
                         continue;
                     }
+                    let clarity_version = publish_clarity_version(tx.clarity_version, epoch.into())
+                        .map_err(|e| format!("requirement {}: {e}", tx.contract_id))?;
 
                     let nonce = next_nonce(&mut cached_nonces, stacks_rpc, &issuer_address)?;
                     let account = stx_accounts_lookup.get(issuer_address.as_str()).unwrap();
@@ -659,7 +769,7 @@ fn encode_transactions(
                     let transaction = encode_contract_publish(
                         &tx.contract_id.name,
                         &source,
-                        None,
+                        clarity_version,
                         account,
                         nonce,
                         tx.cost,
@@ -746,21 +856,11 @@ pub fn apply_on_chain_deployment(
         if deployment.network == StacksNetwork::Devnet {
             // Devnet only: ensure we've reached the appropriate epoch for this batch
             let devnet = network_manifest.devnet.as_ref().unwrap();
-            let after_bitcoin_block = match epoch {
-                EpochSpec::Epoch2_0 => devnet.epoch_2_0,
-                EpochSpec::Epoch2_05 => devnet.epoch_2_05,
-                EpochSpec::Epoch2_1 => devnet.epoch_2_1,
-                EpochSpec::Epoch2_2 => devnet.epoch_2_2,
-                EpochSpec::Epoch2_3 => devnet.epoch_2_3,
-                EpochSpec::Epoch2_4 => devnet.epoch_2_4,
-                EpochSpec::Epoch2_5 => devnet.epoch_2_5,
-                EpochSpec::Epoch3_0 => devnet.epoch_3_0,
-                EpochSpec::Epoch3_1 => devnet.epoch_3_1,
-                EpochSpec::Epoch3_2 => devnet.epoch_3_2,
-                EpochSpec::Epoch3_3 => devnet.epoch_3_3,
-                EpochSpec::Epoch3_4 => devnet.epoch_3_4,
-                // Clarinet always keeps optional support for a future epoch
-                EpochSpec::Epoch4_0 => devnet.epoch_4_0.unwrap_or(u64::MAX),
+            let Some(after_bitcoin_block) = epoch.start_height(devnet) else {
+                let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(format!(
+                    "devnet epoch {epoch:?} is not configured"
+                )));
+                return;
             };
             let mut epoch_transition_successful =
                 current_bitcoin_block_height > after_bitcoin_block;
@@ -807,6 +907,46 @@ pub fn apply_on_chain_deployment(
                     std::thread::sleep(std::time::Duration::from_secs(delay_between_checks));
                 }
             }
+
+            let height = match stacks_rpc.get_info() {
+                Ok(info) => info.burn_block_height,
+                Err(e) => {
+                    let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(format!(
+                        "unable to determine devnet epoch before broadcasting: {e}"
+                    )));
+                    return;
+                }
+            };
+            let active = devnet_epoch(devnet, height);
+            for tracker in &batch {
+                if let TransactionStatus::Encoded(transaction, _) = &tracker.status {
+                    if let TransactionPayload::SmartContract(_, wire_version) = &transaction.payload
+                    {
+                        let version = wire_version
+                            .unwrap_or_else(|| ClarityVersion::default_for_epoch(epoch.into()));
+                        if publish_clarity_version(version, active) != Ok(*wire_version) {
+                            let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(
+                                format!("devnet advanced to epoch {active}; regenerate the deployment plan before publishing"),
+                            ));
+                            return;
+                        }
+                    }
+                }
+            }
+        }
+        // Activation can happen while waiting for an earlier batch to confirm.
+        match public_network_epoch(&deployment, &stacks_rpc) {
+            Ok(Some(active)) if active != StacksEpochId::from(epoch) => {
+                let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(
+                    "target network epoch changed; regenerate the deployment plan before publishing".into(),
+                ));
+                return;
+            }
+            Err(e) => {
+                let _ = deployment_event_tx.send(DeploymentEvent::Interrupted(e));
+                return;
+            }
+            _ => {}
         }
 
         let mut ongoing_batch = BTreeMap::new();
@@ -982,8 +1122,232 @@ pub fn get_initial_transactions_trackers(
 #[cfg(test)]
 mod tests {
     use clarity_repl::repl::boot::{BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS};
+    use stacks_rpc_client::rpc_client::{NodeInfo, PoxInfo};
 
     use super::*;
+    use crate::types::{ContractPublishSpecification, TransactionsBatchSpecification};
+
+    fn test_network_manifest() -> NetworkManifest {
+        let mut file = toml::from_str(&format!(
+            "[network]\nname = 'devnet'\n[accounts.deployer]\nmnemonic = '{}'\nbalance = 1000000000\n[devnet]\n",
+            clarinet_utils::DEFAULT_DEPLOYER_MNEMONIC,
+        )).unwrap();
+        NetworkManifest::from_network_manifest_file(
+            &mut file,
+            &StacksNetwork::Devnet.get_networks(),
+            false,
+            None,
+        )
+        .unwrap()
+    }
+
+    fn pox_response(epoch: StacksEpochId) -> serde_json::Value {
+        serde_json::json!({
+            "contract_id": "ST000000000000000000002AMW42H.pox-4",
+            "pox_activation_threshold_ustx": 0,
+            "first_burnchain_block_height": 0,
+            "current_burnchain_block_height": 200,
+            "prepare_phase_block_length": 50,
+            "reward_phase_block_length": 100,
+            "reward_slots": 1,
+            "reward_cycle_id": 1,
+            "reward_cycle_length": 150,
+            "total_liquid_supply_ustx": 0,
+            "current_cycle": {"id": 1, "min_threshold_ustx": 0, "stacked_ustx": 0, "is_pox_active": true},
+            "next_cycle": {"min_threshold_ustx": 0, "stacked_ustx": 0, "blocks_until_prepare_phase": 1, "blocks_until_reward_phase": 2},
+            "epochs": [{"epoch_id": epoch, "start_height": 100, "end_height": 300}]
+        })
+    }
+
+    #[test]
+    fn estimates_and_signs_the_same_epoch_appropriate_publish() {
+        for (epoch, version, wire_version) in [
+            (StacksEpochId::Epoch20, ClarityVersion::Clarity1, None),
+            (
+                StacksEpochId::Epoch21,
+                ClarityVersion::Clarity2,
+                Some(ClarityVersion::Clarity2),
+            ),
+            (
+                StacksEpochId::Epoch40,
+                ClarityVersion::Clarity6,
+                Some(ClarityVersion::Clarity6),
+            ),
+            (StacksEpochId::Epoch41, ClarityVersion::Clarity7, None),
+        ] {
+            let mut server = mockito::Server::new();
+            let manifest = test_network_manifest();
+            let account = &manifest.accounts["deployer"];
+            let name = ContractName::try_from("epoch-test").unwrap();
+            let source = "(define-read-only (get-value) u1)";
+            let expected = TransactionPayload::SmartContract(
+                TransactionSmartContract {
+                    name: name.clone(),
+                    code_body: StacksString::from_str(source).unwrap(),
+                },
+                wire_version,
+            );
+            let expected_hex = clarity::util::hash::to_hex(&expected.serialize_to_vec());
+            let fees = server
+                .mock("POST", "/v2/fees/transaction")
+                .match_request(move |request| {
+                    let body: serde_json::Value =
+                        serde_json::from_slice(request.body().unwrap()).unwrap();
+                    body["transaction_payload"] == expected_hex
+                })
+                .with_header("content-type", "application/json")
+                .with_body(r#"{"estimations":[{"fee":123}]}"#)
+                .expect(1)
+                .create();
+            let pox = server
+                .mock("GET", "/v2/pox")
+                .with_header("content-type", "application/json")
+                .with_body(pox_response(epoch).to_string())
+                .expect(2)
+                .create();
+            let _info = server
+                .mock("GET", "/v2/info")
+                .with_header("content-type", "application/json")
+                .with_body(serde_json::to_string(&NodeInfo::default()).unwrap())
+                .create();
+            let _nonce = server
+                .mock(
+                    "GET",
+                    format!("/v2/accounts/{}", account.stx_address).as_str(),
+                )
+                .with_header("content-type", "application/json")
+                .with_body(r#"{"balance":"0","nonce":0,"balance_proof":"","nonce_proof":""}"#)
+                .create();
+            let mut deployment = deployment_with_remaps(StacksNetwork::Testnet, None);
+            deployment.stacks_node = Some(server.url());
+            // A saved plan cannot choose an epoch older than the live node.
+            deployment
+                .plan
+                .batches
+                .push(TransactionsBatchSpecification {
+                    id: 0,
+                    epoch: Some(EpochSpec::Epoch2_0),
+                    transactions: vec![TransactionSpecification::ContractPublish(
+                        ContractPublishSpecification {
+                            contract_name: name,
+                            expected_sender: PrincipalData::parse_standard_principal(
+                                &account.stx_address,
+                            )
+                            .unwrap(),
+                            location: "epoch-test.clar".into(),
+                            source: source.into(),
+                            clarity_version: version,
+                            cost: 0,
+                            anchor_block_only: true,
+                        },
+                    )],
+                });
+            update_deployment_costs(&mut deployment, 0).unwrap();
+            let (events, _) = std::sync::mpsc::channel();
+            let encoded = encode_transactions(
+                &deployment,
+                &manifest,
+                &StacksRpc::new(&server.url()),
+                "http://localhost:18443",
+                &events,
+            )
+            .unwrap();
+            let TransactionStatus::Encoded(tx, _) = &encoded[0].1[0].status else {
+                panic!("publish was not encoded");
+            };
+            let decoded =
+                StacksTransaction::consensus_deserialize(&mut tx.serialize_to_vec().as_slice())
+                    .unwrap();
+            assert_eq!(decoded.payload, expected);
+            assert_eq!(decoded.get_tx_fee(), 123);
+            fees.assert();
+            pox.assert();
+        }
+    }
+
+    #[test]
+    fn rejects_old_plan_before_signing_against_epoch_41() {
+        let mut server = mockito::Server::new();
+        let manifest = test_network_manifest();
+        let _info = server
+            .mock("GET", "/v2/info")
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&NodeInfo::default()).unwrap())
+            .create();
+        let _pox = server
+            .mock("GET", "/v2/pox")
+            .with_header("content-type", "application/json")
+            .with_body(pox_response(StacksEpochId::Epoch41).to_string())
+            .create();
+        let nonce = server
+            .mock("GET", mockito::Matcher::Regex("/v2/accounts/.*".into()))
+            .expect(0)
+            .create();
+        let mut deployment = deployment_with_remaps(StacksNetwork::Mainnet, None);
+        deployment
+            .plan
+            .batches
+            .push(TransactionsBatchSpecification {
+                id: 0,
+                epoch: Some(EpochSpec::Epoch4_0),
+                transactions: vec![TransactionSpecification::ContractPublish(
+                    ContractPublishSpecification {
+                        contract_name: ContractName::try_from("old-contract").unwrap(),
+                        expected_sender: PrincipalData::parse_standard_principal(TEST_DEPLOYER)
+                            .unwrap(),
+                        location: "old-contract.clar".into(),
+                        source: "(define-read-only (get-value) u1)".into(),
+                        clarity_version: ClarityVersion::Clarity6,
+                        cost: 0,
+                        anchor_block_only: true,
+                    },
+                )],
+            });
+        let (events, _) = std::sync::mpsc::channel();
+        let error = encode_transactions(
+            &deployment,
+            &manifest,
+            &StacksRpc::new(&server.url()),
+            "http://localhost:18443",
+            &events,
+        )
+        .unwrap_err();
+        assert!(error.contains("old-contract"), "{error}");
+        assert!(error.contains("Clarity 6"), "{error}");
+        nonce.assert();
+    }
+
+    #[test]
+    fn rejects_unknown_or_uncovered_target_epoch_schedule() {
+        let mut response = pox_response(StacksEpochId::Epoch40);
+        response["current_burnchain_block_height"] = 300.into();
+        let pox: PoxInfo = serde_json::from_value(response.clone()).unwrap();
+        assert!(pox.active_epoch().is_err());
+        response["epochs"][0]["epoch_id"] = "Epoch42".into();
+        assert!(serde_json::from_value::<PoxInfo>(response).is_err());
+    }
+
+    #[test]
+    fn resolves_activation_height_and_staggered_public_networks() {
+        let mut testnet = pox_response(StacksEpochId::Epoch40);
+        testnet["epochs"] = serde_json::json!([
+            {"epoch_id":"Epoch40", "start_height":100, "end_height":200},
+            {"epoch_id":"Epoch41", "start_height":200, "end_height":300}
+        ]);
+        let pox: PoxInfo = serde_json::from_value(testnet.clone()).unwrap();
+        assert_eq!(pox.active_epoch().unwrap(), StacksEpochId::Epoch41);
+        testnet["current_burnchain_block_height"] = 199.into();
+        let pox: PoxInfo = serde_json::from_value(testnet).unwrap();
+        assert_eq!(pox.active_epoch().unwrap(), StacksEpochId::Epoch40);
+        assert_eq!(
+            target_epoch(&StacksNetwork::Testnet, None, Some(StacksEpochId::Epoch41)),
+            StacksEpochId::Epoch41
+        );
+        assert_eq!(
+            target_epoch(&StacksNetwork::Mainnet, None, Some(StacksEpochId::Epoch40)),
+            StacksEpochId::Epoch40
+        );
+    }
 
     #[test]
     fn rewrites_sbtc_contract_references_for_testnet_deployments() {

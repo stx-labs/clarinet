@@ -1,6 +1,7 @@
 use std::io::Cursor;
 
 use clarity::codec::StacksMessageCodec;
+use clarity::types::StacksEpochId;
 use clarity::util::hash::{bytes_to_hex, hex_bytes, to_hex};
 use clarity::vm::types::Value;
 use reqwest::blocking::Client;
@@ -79,6 +80,31 @@ pub struct PoxInfo {
     pub total_liquid_supply_ustx: u64,
     pub current_cycle: CurrentPoxCycle,
     pub next_cycle: NextPoxCycle,
+    #[serde(default)]
+    pub epochs: Vec<PoxEpoch>,
+}
+
+#[cfg_attr(feature = "mock", derive(Serialize))]
+#[derive(Deserialize, Debug, Clone)]
+pub struct PoxEpoch {
+    pub epoch_id: StacksEpochId,
+    pub start_height: u64,
+    pub end_height: u64,
+}
+
+impl PoxInfo {
+    pub fn active_epoch(&self) -> Result<StacksEpochId, RpcError> {
+        let height = u64::from(self.current_burnchain_block_height);
+        self.epochs
+            .iter()
+            .find(|epoch| epoch.start_height <= height && height < epoch.end_height)
+            .map(|epoch| epoch.epoch_id)
+            .ok_or_else(|| {
+                RpcError::Message(format!(
+                    "node epoch schedule does not cover burn height {height}"
+                ))
+            })
+    }
 }
 
 #[cfg_attr(feature = "mock", derive(Serialize))]
