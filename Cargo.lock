@@ -687,7 +687,7 @@ checksum = "e0921b3876b3a1df8a1c9f912e7f94342458022c2e84288015893d83c4d62a79"
 
 [[package]]
 name = "clarinet-cli"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "chrono",
  "clap",
@@ -729,14 +729,14 @@ dependencies = [
 
 [[package]]
 name = "clarinet-defaults"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "clarity",
 ]
 
 [[package]]
 name = "clarinet-deployments"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "bitcoin",
  "bitcoincore-rpc",
@@ -766,7 +766,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-files"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "bitcoin",
  "clarinet-defaults",
@@ -800,7 +800,7 @@ dependencies = [
 
 [[package]]
 name = "clarinet-sdk-wasm"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -856,7 +856,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-lsp"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "clarinet-defaults",
  "clarinet-deployments",
@@ -885,7 +885,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-repl"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "bytes",
  "chrono",
@@ -932,7 +932,7 @@ dependencies = [
 
 [[package]]
 name = "clarity-static-cost"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "clarity",
  "clarity-types",
@@ -2869,7 +2869,7 @@ dependencies = [
 
 [[package]]
 name = "observer"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "axum",
  "base64 0.22.1",
@@ -4311,7 +4311,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-network"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "bitcoincore-rpc",
  "bollard",
@@ -4343,7 +4343,7 @@ dependencies = [
 
 [[package]]
 name = "stacks-rpc-client"
-version = "4.0.0"
+version = "4.1.0"
 dependencies = [
  "clarinet-utils",
  "clarity",
