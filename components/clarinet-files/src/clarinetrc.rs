@@ -27,10 +27,10 @@ impl ClarinetRC {
     fn read_rc_file() -> Option<Self> {
         let path = Self::get_settings_file_path().filter(|path| path.exists())?;
         let content = std::fs::read_to_string(&path)
-            .inspect_err(|_| println!("unable to read file {}", path.display()))
+            .inspect_err(|_| clarity_repl::ueprint!("unable to read file {}", path.display()))
             .ok()?;
         toml::from_str(&content)
-            .inspect_err(|_| println!("unable to parse {}", path.display()))
+            .inspect_err(|_| clarity_repl::ueprint!("unable to parse {}", path.display()))
             .ok()
     }
 }
