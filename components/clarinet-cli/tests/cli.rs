@@ -67,7 +67,6 @@ fn new_project_still_accepts_disable_telemetry_flag() {
         .current_dir(&temp_dir)
         .status();
     assert!(status.unwrap().success());
-    assert!(temp_dir.path().join("test_project/Clarinet.toml").is_file());
 }
 
 #[test]

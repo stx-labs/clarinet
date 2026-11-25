@@ -579,16 +579,13 @@ mod tests {
 
     #[test]
     fn legacy_telemetry_setting_is_ignored() {
-        let manifest_toml = toml! {
+        let manifest = parse_manifest(indoc! {r#"
             [project]
-            name = "test-project"
+            name = "legacy"
             telemetry = true
-        };
-        let manifest_file: ProjectManifestFile = manifest_toml.try_into().unwrap();
-        let location = PathBuf::from("/tmp/clarinet.toml");
-        let manifest =
-            ProjectManifest::from_project_manifest_file(manifest_file, &location, false).unwrap();
-        assert_eq!(manifest.project.name, "test-project");
+        "#})
+        .unwrap();
+        assert!(manifest.diagnostics.is_empty());
     }
 
     #[test]

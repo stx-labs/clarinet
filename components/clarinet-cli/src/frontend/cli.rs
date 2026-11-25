@@ -615,18 +615,7 @@ struct Completions {
 }
 
 pub fn main() {
-    let opts: Opts = match Opts::try_parse() {
-        Ok(opts) => opts,
-        Err(e) => {
-            // handle --version, --help, etc
-            // see how to safely print clap errors here:
-            // https://github.com/clap-rs/clap/blob/21b671f689bc0b8d790dc8c42902c22822bf6f82/clap_builder/src/error/mod.rs#L233
-            let _ = e.print();
-            let _ = std::io::stdout().lock().flush();
-            let _ = std::io::stderr().lock().flush();
-            std::process::exit(e.exit_code());
-        }
-    };
+    let opts = Opts::parse();
 
     let clarinetrc = ClarinetRC::from_rc_file();
 
@@ -905,10 +894,9 @@ pub fn main() {
                 } else {
                     get_initial_transactions_trackers(&deployment)
                 };
-                let network_moved = network.clone();
                 let res = NetworkManifest::from_project_root(
                     &manifest.root_dir,
-                    &network_moved.get_networks(),
+                    &network.get_networks(),
                     manifest.use_mainnet_wallets(),
                     Some(&manifest.project.cache_location),
                 );
@@ -1077,12 +1065,10 @@ pub fn main() {
             let mut expressions = cmd.eval.iter();
             // Loop to handle `::reload` command
             loop {
-                let manifest = load_manifest_or_warn(cmd.manifest_path.clone());
-
-                let mut terminal = match manifest {
-                    Some(ref manifest) => {
+                let mut terminal = match load_manifest_or_warn(cmd.manifest_path.clone()) {
+                    Some(manifest) => {
                         let ((deployment, _, artifacts), _) = load_deployment_and_artifacts_or_exit(
-                            manifest,
+                            &manifest,
                             &cmd.deployment_plan_path,
                             if !interactive
                                 && !cmd.use_on_disk_deployment_plan
