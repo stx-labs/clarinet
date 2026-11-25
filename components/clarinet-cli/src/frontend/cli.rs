@@ -311,7 +311,7 @@ struct EncryptDeployment {
 struct GenerateProject {
     /// Project's name
     pub name: String,
-    /// No-op, accepted so existing scripts keep working
+    /// Deprecated: telemetry was removed, this flag does nothing
     #[clap(long = "disable-telemetry", hide = true)]
     pub disable_telemetry: bool,
 }
