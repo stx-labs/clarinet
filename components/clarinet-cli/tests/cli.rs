@@ -1049,8 +1049,12 @@ fn test_check_single_file_reports_removed_analysis_settings() {
                 assert!(!stderr.contains(warning), "{stderr}");
                 let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
                 assert_eq!(json["success"], true);
-                let manifest_diags = json["diagnostics"][manifest_path.to_str().unwrap()]
-                    .as_array()
+                let manifest_diags = json["diagnostics"]
+                    .as_object()
+                    .unwrap()
+                    .iter()
+                    .find(|(path, _)| fs::canonicalize(path).is_ok_and(|p| p == manifest_path))
+                    .and_then(|(_, diagnostics)| diagnostics.as_array())
                     .expect("manifest diagnostics must be keyed by the manifest path");
                 assert_eq!(manifest_diags.len(), 1, "{json}");
                 assert_eq!(manifest_diags[0]["level"], "Warning");

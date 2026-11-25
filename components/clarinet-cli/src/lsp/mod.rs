@@ -55,21 +55,13 @@ fn test_opening_counter_contract_should_return_fresh_analysis() {
         panic!("Unable to get response")
     };
 
-    // a fresh analysis reports both counter contracts and the manifest, which have no diagnostics
+    // Both open paths should publish the same diagnostics for the project.
     let manifest_location = contract_location
         .parent()
         .and_then(|p| p.parent())
         .expect("Unable to get project dir")
         .join("Clarinet.toml");
-    assert_eq!(response.aggregated_diagnostics.len(), 3);
-    assert!(response
-        .aggregated_diagnostics
-        .iter()
-        .any(|(path, _)| path == &manifest_location));
-    assert!(response
-        .aggregated_diagnostics
-        .iter()
-        .all(|(_, diags)| diags.is_empty()));
+    assert_counter_diagnostics(&response, &manifest_location);
 
     // re-opening this contract should not trigger a full analysis
     let _ = notification_tx.send(LspNotification::ContractOpened(contract_location));
@@ -109,16 +101,7 @@ fn test_opening_counter_manifest_should_return_fresh_analysis() {
         panic!("Unable to get response")
     };
 
-    // a fresh analysis reports both counter contracts and the manifest, which have no diagnostics
-    assert_eq!(response.aggregated_diagnostics.len(), 3);
-    assert!(response
-        .aggregated_diagnostics
-        .iter()
-        .any(|(path, _)| path == &manifest_location));
-    assert!(response
-        .aggregated_diagnostics
-        .iter()
-        .all(|(_, diags)| diags.is_empty()));
+    assert_counter_diagnostics(&response, &manifest_location);
 
     // re-opening this manifest should not trigger a full analysis
     let _ = notification_tx.send(LspNotification::ManifestOpened(manifest_location));
@@ -127,6 +110,31 @@ fn test_opening_counter_manifest_should_return_fresh_analysis() {
         panic!("Unable to get response")
     };
     assert_eq!(response, LspNotificationResponse::default());
+}
+
+#[cfg(test)]
+fn assert_counter_diagnostics(
+    response: &clarity_lsp::backend::LspNotificationResponse,
+    manifest: &std::path::Path,
+) {
+    assert_eq!(response.aggregated_diagnostics.len(), 3);
+    let (_, warnings) = response
+        .aggregated_diagnostics
+        .iter()
+        .find(|(path, _)| path == manifest)
+        .expect("missing counter manifest diagnostics");
+    assert_eq!(warnings.len(), 2);
+    for name in ["counter", "counter-2"] {
+        assert!(warnings.iter().any(|w| {
+            w.diagnostic.message.contains(&format!("`{name}`"))
+                && w.diagnostic.message.contains("cannot be newly deployed")
+        }));
+    }
+    assert!(response
+        .aggregated_diagnostics
+        .iter()
+        .filter(|(path, _)| path != manifest)
+        .all(|(_, diags)| diags.is_empty()));
 }
 
 #[test]
@@ -161,7 +169,13 @@ fn test_opening_simple_nft_manifest_should_return_fresh_analysis() {
         .iter()
         .partition(|(path, _)| path != &manifest_location);
     assert_eq!(manifest_diags.len(), 1);
-    assert!(manifest_diags[0].1.is_empty());
+    let warnings = &manifest_diags[0].1;
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].diagnostic.message.contains("`simple-nft`"));
+    assert!(warnings[0]
+        .diagnostic
+        .message
+        .contains("cannot be newly deployed"));
     // default lints emit 2 warnings and 3 notes for simple-nft.clar
     assert_eq!(contract_diags[0].1.len(), 5);
 }
