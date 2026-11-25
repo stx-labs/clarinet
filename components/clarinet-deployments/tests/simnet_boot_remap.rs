@@ -54,7 +54,6 @@ fn write_project(root: &Path, contract_name: &str, source: &str, extra_manifest:
         name = "boot-remap-test"
         authors = []
         description = ""
-        telemetry = false
 
         [contracts.{contract_name}]
         path = "contracts/{contract_name}.clar"

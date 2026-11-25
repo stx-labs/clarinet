@@ -2,7 +2,6 @@
 name = 'test-cases'
 description = ''
 authors = []
-telemetry = false
 cache_dir = './.cache'
 
 [[project.requirements]]

@@ -2,7 +2,6 @@
 name = "custom-boot-contracts-example"
 authors = []
 description = "Example project demonstrating custom boot contract overrides"
-telemetry = false
 
 # Override boot contracts with custom implementations
 [project.override_boot_contracts_source]

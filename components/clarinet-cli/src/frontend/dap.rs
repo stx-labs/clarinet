@@ -16,8 +16,6 @@ use clarity_repl::utils::sdk_events::serialize_events;
 use clarity_repl::utils::{serialize_event, Environment};
 use serde::Deserialize;
 
-#[cfg(feature = "telemetry")]
-use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
 use crate::deployments::generate_default_deployment;
 
 pub fn run_dap() -> Result<(), String> {
@@ -40,16 +38,6 @@ pub fn run_dap() -> Result<(), String> {
                 Environment::Simnet,
             )
             .session;
-
-            if project_manifest.project.telemetry {
-                #[cfg(feature = "telemetry")]
-                telemetry_report_event(DeveloperUsageEvent::DAPDebugStarted(
-                    DeveloperUsageDigest::new(
-                        &project_manifest.project.name,
-                        &project_manifest.project.authors,
-                    ),
-                ));
-            }
 
             for (contract_id, (_, location)) in deployment.contracts {
                 dap.path_to_contract_id

@@ -62,7 +62,6 @@ impl Project {
             name = "remap-test"
             authors = []
             description = ""
-            telemetry = false
             {project_toml}
 
             {contracts}

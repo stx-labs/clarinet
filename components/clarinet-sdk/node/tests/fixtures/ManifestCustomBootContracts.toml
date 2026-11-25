@@ -1,7 +1,6 @@
 [project]
 name = 'custom-boot-contracts-fixture'
 description = 'fixture to verify override_boot_contracts_source works under the wasm SDK'
-telemetry = false
 cache_dir = './.cache'
 requirements = []
 

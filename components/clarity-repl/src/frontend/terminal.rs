@@ -54,28 +54,22 @@ fn complete_input(str: &str) -> Result<Input, (char, char)> {
 
 pub struct Terminal {
     pub session: Session,
-    pub executed: Vec<String>,
 }
 
 impl Terminal {
     pub fn new(session_settings: SessionSettings) -> Terminal {
         Terminal {
             session: Session::new(session_settings),
-            executed: vec![],
         }
     }
 
     pub fn load(session: Session) -> Terminal {
-        Terminal {
-            session,
-            executed: vec![],
-        }
+        Terminal { session }
     }
 
     /// Evaluates one console input, routed like `Session::process_console_input`.
     /// Returns `Ok(true)` when the input requests a reload.
     pub fn eval(&mut self, input: &str) -> Result<bool, String> {
-        self.executed.push(input.to_string());
         if input.starts_with("::reload") {
             return Ok(true);
         }
@@ -199,7 +193,6 @@ impl Terminal {
                                 println!("{line}");
                             }
                             prompt = String::from(">> ");
-                            self.executed.push(input.to_string());
                             let _ = editor.add_history_entry(input);
                             input_buffer.clear();
                             if reload {

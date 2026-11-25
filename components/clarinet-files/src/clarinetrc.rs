@@ -6,7 +6,6 @@ use serde::{Deserialize, Serialize};
 #[derive(Serialize, Deserialize, Default, Debug)]
 pub struct ClarinetRC {
     pub enable_hints: Option<bool>,
-    pub enable_telemetry: Option<bool>,
 }
 
 impl ClarinetRC {
@@ -39,7 +38,6 @@ impl ClarinetRC {
         let disable_hints = env::var("CLARINET_DISABLE_HINTS").ok();
         Self {
             enable_hints: enable_hints_from_env(disable_hints.as_deref()),
-            ..Default::default()
         }
     }
 }
@@ -52,6 +50,13 @@ fn enable_hints_from_env(disable_hints: Option<&str>) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_telemetry_setting_is_ignored() {
+        let rc: ClarinetRC =
+            toml::from_str("enable_hints = false\nenable_telemetry = true\n").unwrap();
+        assert_eq!(rc.enable_hints, Some(false));
+    }
 
     #[test]
     fn disable_hints_env_var() {

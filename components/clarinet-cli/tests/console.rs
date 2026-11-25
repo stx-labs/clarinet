@@ -183,7 +183,7 @@ fn eval_uses_one_project_session_and_routes_startup_diagnostics() {
     let temp_dir = tempfile::tempdir().unwrap();
     let clarinet = env!("CARGO_BIN_EXE_clarinet");
     let output = Command::new(clarinet)
-        .args(["new", "counter-project", "--disable-telemetry"])
+        .args(["new", "counter-project"])
         .current_dir(&temp_dir)
         .output()
         .unwrap();

@@ -148,7 +148,6 @@ fn build_manifest(n: usize) -> String {
     let mut out = String::from(indoc! {r#"
         [project]
         name = 'bench-project'
-        telemetry = false
 
     "#});
     for i in 0..n {

@@ -21,16 +21,10 @@ pub struct GetChangesForNewProject {
     project_name: String,
     use_current_dir: bool,
     changes: Vec<Changes>,
-    telemetry_enabled: bool,
 }
 
 impl GetChangesForNewProject {
-    pub fn new(
-        project_path: String,
-        project_name: String,
-        use_current_dir: bool,
-        telemetry_enabled: bool,
-    ) -> Self {
+    pub fn new(project_path: String, project_name: String, use_current_dir: bool) -> Self {
         let project_path = if use_current_dir {
             project_path
         } else {
@@ -42,7 +36,6 @@ impl GetChangesForNewProject {
             project_name,
             use_current_dir,
             changes: vec![],
-            telemetry_enabled,
         }
     }
 
@@ -175,7 +168,6 @@ impl GetChangesForNewProject {
             name = "{name}"
             description = ""
             authors = []
-            telemetry = {tel}
             cache_dir = "./.cache"
 
             # [contracts.counter]
@@ -183,7 +175,6 @@ impl GetChangesForNewProject {
             # epoch = "latest"
         "#,
             name = self.project_name,
-            tel = self.telemetry_enabled
         );
         let name = "Clarinet.toml".into();
         self.changes
@@ -574,7 +565,7 @@ mod tests {
     }
 
     fn generated_devnet_toml() -> String {
-        GetChangesForNewProject::new("/tmp".into(), "drift-guard".into(), false, false)
+        GetChangesForNewProject::new("/tmp".into(), "drift-guard".into(), false)
             .run()
             .expect("project generation failed")
             .into_iter()

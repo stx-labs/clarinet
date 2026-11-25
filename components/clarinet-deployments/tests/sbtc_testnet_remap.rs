@@ -43,7 +43,6 @@ fn write_project(root: &Path, contract_id: &str) {
         name = "sbtc-remap-test"
         authors = []
         description = ""
-        telemetry = false
 
         [[project.requirements]]
         contract_id = "{contract_id}"

@@ -48,8 +48,6 @@ use stacks_network::{self, DevnetOrchestrator};
 use strum::{EnumMessage, VariantArray};
 use toml_edit::DocumentMut;
 
-#[cfg(feature = "telemetry")]
-use super::telemetry::{telemetry_report_event, DeveloperUsageDigest, DeveloperUsageEvent};
 use super::update_check;
 use crate::deployments::types::DeploymentSynthesis;
 use crate::deployments::{
@@ -313,8 +311,8 @@ struct EncryptDeployment {
 struct GenerateProject {
     /// Project's name
     pub name: String,
-    /// Do not provide developer usage telemetry for this project
-    #[clap(long = "disable-telemetry")]
+    /// No-op, accepted so existing scripts keep working
+    #[clap(long = "disable-telemetry", hide = true)]
     pub disable_telemetry: bool,
 }
 
@@ -620,20 +618,6 @@ pub fn main() {
     let opts: Opts = match Opts::try_parse() {
         Ok(opts) => opts,
         Err(e) => {
-            if e.kind() == clap::error::ErrorKind::UnknownArgument {
-                let manifest = load_manifest_or_exit(None, false);
-                if manifest.project.telemetry {
-                    #[cfg(feature = "telemetry")]
-                    telemetry_report_event(DeveloperUsageEvent::UnknownCommand(
-                        DeveloperUsageDigest::new(
-                            &manifest.project.name,
-                            &manifest.project.authors,
-                        ),
-                        e.to_string(),
-                    ));
-                }
-            }
-
             // handle --version, --help, etc
             // see how to safely print clap errors here:
             // https://github.com/clap-rs/clap/blob/21b671f689bc0b8d790dc8c42902c22822bf6f82/clap_builder/src/error/mod.rs#L233
@@ -708,59 +692,10 @@ pub fn main() {
                 format!("{current_path}/{relative_dir}")
             };
 
-            let telemetry_enabled = if cfg!(feature = "telemetry") {
-                if project_opts.disable_telemetry {
-                    false
-                } else {
-                    match clarinetrc.enable_telemetry {
-                        Some(enable) => enable,
-                        _ => {
-                            println!("{}", yellow!("Send usage data to Stacks Labs."));
-                            println!("{}", yellow!("Help Stacks Labs improve its products and services by automatically sending diagnostics and usage data."));
-                            println!("{}", yellow!("Only high level usage information, and no information identifying you or your project are collected."));
-                            println!("{}",
-                                yellow!("Enable or disable clarinet telemetry globally with this command:")
-                            );
-                            if let Some(settings_path) = ClarinetRC::get_settings_file_path() {
-                                println!(
-                                    "{}",
-                                    blue!(
-                                        "  $ mkdir -p ~/.clarinet; echo \"enable_telemetry = true\" >> {}",
-                                        settings_path.display()
-                                    )
-                                );
-                            }
-                            // TODO(lgalabru): once we have a privacy policy available, add a link
-                            // println!("{}", yellow!("Visit http://hiro.so/clarinet-privacy for details."));
-                            println!("{}", yellow!("Enable [Y/n]?"));
-                            let mut buffer = String::new();
-                            std::io::stdin().read_line(&mut buffer).unwrap();
-                            !buffer.starts_with('n')
-                        }
-                    }
-                }
-            } else {
-                false
-            };
-            if telemetry_enabled {
-                println!(
-                    "{}",
-                    yellow!("Telemetry enabled. Thanks for helping to improve clarinet!")
-                );
-            } else {
-                println!(
-                    "{}",
-                    yellow!(
-                        "Telemetry disabled. Clarinet will not collect any data on this project."
-                    )
-                );
-            }
-
             let changes = match generate::get_changes_for_new_project(
                 project_path,
                 project_id,
                 use_current_dir,
-                telemetry_enabled,
             ) {
                 Ok(changes) => changes,
                 Err(message) => {
@@ -774,13 +709,6 @@ pub fn main() {
             }
             if clarinetrc.enable_hints.unwrap_or(true) {
                 display_contract_new_hint(Some(project_opts.name.as_str()));
-            }
-            if telemetry_enabled {
-                #[cfg(feature = "telemetry")]
-                telemetry_report_event(DeveloperUsageEvent::NewProject(DeveloperUsageDigest::new(
-                    &project_opts.name,
-                    &[],
-                )));
             }
         }
         Command::Deployments(subcommand) => match subcommand {
@@ -971,18 +899,6 @@ pub fn main() {
 
                 let (command_tx, command_rx) = std::sync::mpsc::channel();
                 let (event_tx, event_rx) = std::sync::mpsc::channel();
-                let manifest_moved = manifest.clone();
-
-                if manifest.project.telemetry {
-                    #[cfg(feature = "telemetry")]
-                    telemetry_report_event(DeveloperUsageEvent::ProtocolPublished(
-                        DeveloperUsageDigest::new(
-                            &manifest.project.name,
-                            &manifest.project.authors,
-                        ),
-                        network.clone(),
-                    ));
-                }
 
                 let transaction_trackers = if cmd.no_dashboard {
                     vec![]
@@ -990,7 +906,6 @@ pub fn main() {
                     get_initial_transactions_trackers(&deployment)
                 };
                 let network_moved = network.clone();
-                let manifest = manifest_moved;
                 let res = NetworkManifest::from_project_root(
                     &manifest.root_dir,
                     &network_moved.get_networks(),
@@ -1239,38 +1154,6 @@ pub fn main() {
                     })
                 };
 
-                // Report telemetry
-                if let Some(manifest) = manifest {
-                    if manifest.project.telemetry {
-                        #[cfg(feature = "telemetry")]
-                        telemetry_report_event(DeveloperUsageEvent::PokeExecuted(
-                            DeveloperUsageDigest::new(
-                                &manifest.project.name,
-                                &manifest.project.authors,
-                            ),
-                        ));
-
-                        #[cfg(feature = "telemetry")]
-                        {
-                            let mut debug_count = 0;
-                            for command in terminal.executed {
-                                if command.starts_with("::debug") {
-                                    debug_count += 1;
-                                }
-                            }
-                            if debug_count > 0 {
-                                telemetry_report_event(DeveloperUsageEvent::DebugStarted(
-                                    DeveloperUsageDigest::new(
-                                        &manifest.project.name,
-                                        &manifest.project.authors,
-                                    ),
-                                    debug_count,
-                                ));
-                            }
-                        }
-                    }
-                }
-
                 if !reload {
                     break;
                 }
@@ -1518,12 +1401,6 @@ pub fn main() {
                 }
             }
 
-            if manifest.project.telemetry {
-                #[cfg(feature = "telemetry")]
-                telemetry_report_event(DeveloperUsageEvent::CheckExecuted(
-                    DeveloperUsageDigest::new(&manifest.project.name, &manifest.project.authors),
-                ));
-            }
             // Returns first non-zero exit code, if any
             let exit_code = exit_codes.iter().cloned().find(|c| *c != 0).unwrap_or(0);
             std::process::exit(exit_code);
@@ -2517,16 +2394,6 @@ fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
         }
     };
 
-    if orchestrator.manifest.project.telemetry {
-        #[cfg(feature = "telemetry")]
-        telemetry_report_event(DeveloperUsageEvent::DevnetExecuted(
-            DeveloperUsageDigest::new(
-                &orchestrator.manifest.project.name,
-                &orchestrator.manifest.project.authors,
-            ),
-        ));
-    }
-
     let differ = DevnetDiffConfig::new();
     let compatible = differ.is_compatible(orchestrator.devnet_config());
     if let Err(incompatibles) = compatible {
@@ -2799,7 +2666,6 @@ mod tests {
                 name = "test-project"
                 description = "A test project"
                 authors = ["Test Author"]
-                telemetry = false
 
                 # This comment should survive
 
@@ -2838,8 +2704,8 @@ mod tests {
                 "Project name should be preserved"
             );
             assert!(
-                has_toml_value(&output, "project.telemetry", "false"),
-                "Telemetry setting should be preserved"
+                has_toml_value(&output, "project.description", "A test project"),
+                "Project description should be preserved"
             );
 
             // Verify contract is still there
@@ -2992,7 +2858,6 @@ mod tests {
                 name = 'simple-nft'
                 description = ''
                 authors = []
-                telemetry = false
                 cache_dir = './.cache'
 
                 [[project.requirements]]
@@ -3055,7 +2920,6 @@ mod tests {
                 name = "counter"
                 authors = []
                 description = ""
-                telemetry = false
 
                 [contracts.counter]
                 path = "contracts/counter.clar"
@@ -3212,7 +3076,6 @@ mod tests {
                 [project]
                 name = "lint-ordering-test"
                 authors = []
-                telemetry = false
 
                 [contracts.existing-contract]
                 path = "contracts/existing.clar"
