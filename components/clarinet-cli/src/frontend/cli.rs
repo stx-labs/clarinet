@@ -2438,6 +2438,11 @@ mod tests {
     }
 
     #[test]
+    fn new_still_accepts_disable_telemetry_flag() {
+        Opts::try_parse_from(["clarinet", "new", "my-project", "--disable-telemetry"]).unwrap();
+    }
+
+    #[test]
     fn test_sanitize_project_name() {
         let sanitized = sanitize_project_name("hello_world");
         assert_eq!(sanitized, "hello_world");

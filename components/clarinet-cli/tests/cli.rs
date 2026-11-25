@@ -60,16 +60,6 @@ fn create_new_project(project_name: &str) -> tempfile::TempDir {
 }
 
 #[test]
-fn new_project_still_accepts_disable_telemetry_flag() {
-    let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
-    let status = Command::new(env!("CARGO_BIN_EXE_clarinet"))
-        .args(["new", "test_project", "--disable-telemetry"])
-        .current_dir(&temp_dir)
-        .status();
-    assert!(status.unwrap().success());
-}
-
-#[test]
 fn test_new_project() {
     let project_name = "test_project";
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
