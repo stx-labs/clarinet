@@ -33,6 +33,8 @@ use crate::analysis::coverage::CoverageHook;
 use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::repl::docs;
 use crate::repl::hooks::tracer::TracerHook;
 use crate::repl::settings::{Account, LogPrintEvents};
 use crate::utils::serialize_event;
@@ -1884,23 +1886,17 @@ impl Session {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn display_functions(&self) -> String {
-        use crate::repl::docs::CLARITY_STD_INDEX;
-        format!("{}", CLARITY_STD_INDEX.join("\n").yellow())
+        format!("{}", docs::functions_index().join("\n").yellow())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn keywords(&self) -> String {
-        use crate::repl::docs::CLARITY_KEYWORDS_INDEX;
-        format!("{}", CLARITY_KEYWORDS_INDEX.join("\n").yellow())
+        format!("{}", docs::keywords_index().join("\n").yellow())
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn lookup_functions_or_keywords_docs(&self, exp: &str) -> Option<&str> {
-        use crate::repl::docs::{CLARITY_KEYWORDS_REF, CLARITY_STD_REF};
-        CLARITY_STD_REF
-            .get(exp)
-            .or_else(|| CLARITY_KEYWORDS_REF.get(exp))
-            .map(|s| s.as_str())
+        docs::describe(exp)
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -106,6 +106,9 @@ enum Command {
     /// Load contracts in a REPL for an interactive session
     #[clap(name = "console", aliases = &["poke"], bin_name = "console")]
     Console(Console),
+    /// Display Clarity documentation for native functions and keywords
+    #[clap(name = "docs", bin_name = "docs")]
+    Docs(Docs),
     /// Run syntax checking, type checking, and lints on contracts
     #[clap(name = "check", bin_name = "check")]
     Check(Check),
@@ -493,6 +496,14 @@ struct ApplyDeployment {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+#[clap(after_help = "Examples:\n  clarinet docs\n  clarinet docs 'as-contract?' with-stx")]
+struct Docs {
+    /// Functions or keywords to describe; lists all of them when omitted
+    #[clap(value_name = "NAME")]
+    pub names: Vec<String>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1060,6 +1071,7 @@ pub fn main() {
                 }
             }
         },
+        Command::Docs(cmd) => display_docs(&cmd.names),
         Command::Console(cmd) => {
             let interactive = cmd.eval.is_empty();
             let mut expressions = cmd.eval.iter();
@@ -1512,6 +1524,35 @@ pub fn main() {
     };
 
     update_check::print_update_message(update_handle);
+}
+
+fn display_docs(names: &[String]) {
+    use clarity_repl::repl::docs;
+
+    if names.is_empty() {
+        println!("Functions\n{}", docs::functions_index().join("\n"));
+        println!("\nKeywords\n{}", docs::keywords_index().join("\n"));
+        return;
+    }
+
+    let mut found_all = true;
+    for (i, name) in names.iter().enumerate() {
+        match docs::describe(name) {
+            Some(doc) => {
+                if i > 0 {
+                    println!();
+                }
+                println!("# {name}\n{doc}");
+            }
+            None => {
+                eprintln!("{} no documentation found for '{name}'", red!("error:"));
+                found_all = false;
+            }
+        }
+    }
+    if !found_all {
+        std::process::exit(1);
+    }
 }
 
 fn print_available_lints(settings: &analysis::Settings) {

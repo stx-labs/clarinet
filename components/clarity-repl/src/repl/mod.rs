@@ -3,7 +3,7 @@ pub mod clarity_values;
 pub mod datastore;
 pub mod diagnostic;
 #[cfg(not(target_arch = "wasm32"))]
-mod docs;
+pub mod docs;
 pub mod hooks;
 pub mod interpreter;
 pub mod mempool;

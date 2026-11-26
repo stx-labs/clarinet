@@ -45,9 +45,9 @@ fn clarity_keywords() -> HashMap<String, String> {
         .collect()
 }
 
-pub static CLARITY_STD_REF: LazyLock<HashMap<String, String>> = LazyLock::new(build_api_reference);
+static CLARITY_STD_REF: LazyLock<HashMap<String, String>> = LazyLock::new(build_api_reference);
 
-pub static CLARITY_STD_INDEX: LazyLock<Vec<String>> = LazyLock::new(|| {
+static CLARITY_STD_INDEX: LazyLock<Vec<String>> = LazyLock::new(|| {
     let mut keys = CLARITY_STD_REF
         .keys()
         .map(String::from)
@@ -56,10 +56,9 @@ pub static CLARITY_STD_INDEX: LazyLock<Vec<String>> = LazyLock::new(|| {
     keys
 });
 
-pub static CLARITY_KEYWORDS_REF: LazyLock<HashMap<String, String>> =
-    LazyLock::new(clarity_keywords);
+static CLARITY_KEYWORDS_REF: LazyLock<HashMap<String, String>> = LazyLock::new(clarity_keywords);
 
-pub static CLARITY_KEYWORDS_INDEX: LazyLock<Vec<String>> = LazyLock::new(|| {
+static CLARITY_KEYWORDS_INDEX: LazyLock<Vec<String>> = LazyLock::new(|| {
     let mut keys = CLARITY_KEYWORDS_REF
         .keys()
         .map(String::from)
@@ -67,3 +66,40 @@ pub static CLARITY_KEYWORDS_INDEX: LazyLock<Vec<String>> = LazyLock::new(|| {
     keys.sort();
     keys
 });
+
+pub fn functions_index() -> &'static [String] {
+    &CLARITY_STD_INDEX
+}
+
+pub fn keywords_index() -> &'static [String] {
+    &CLARITY_KEYWORDS_INDEX
+}
+
+pub fn describe(name: &str) -> Option<&'static str> {
+    CLARITY_STD_REF
+        .get(name)
+        .or_else(|| CLARITY_KEYWORDS_REF.get(name))
+        .map(String::as_str)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn describe_finds_functions_and_keywords() {
+        assert!(describe("map").unwrap().starts_with("Usage\n(map "));
+        assert!(describe("tx-sender").unwrap().starts_with("Description\n"));
+        assert_eq!(describe("not-a-clarity-name"), None);
+    }
+
+    #[test]
+    fn indexes_are_sorted_and_complete() {
+        assert!(functions_index().is_sorted());
+        assert!(keywords_index().is_sorted());
+        assert!(functions_index()
+            .iter()
+            .all(|name| describe(name).is_some()));
+        assert!(keywords_index().iter().all(|name| describe(name).is_some()));
+    }
+}
