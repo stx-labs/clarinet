@@ -1859,6 +1859,53 @@ mod tests {
         assert_eq!(value.result, Value::UInt(1));
     }
 
+    #[test]
+    fn emulated_publish_gates_transient_contracts_at_epoch_41() {
+        for (epoch, clarity_version) in [
+            (StacksEpochId::Epoch40, ClarityVersion::Clarity6),
+            (StacksEpochId::Epoch41, ClarityVersion::Clarity7),
+        ] {
+            let mut session = Session::new_without_boot_contracts(SessionSettings {
+                epoch_id: Some(epoch),
+                ..SessionSettings::default()
+            });
+            let sender = session.get_tx_sender();
+            let deployer = PrincipalData::parse_standard_principal(DEPLOYER).unwrap();
+            let principal: PrincipalData = deployer.clone().into();
+            let mut spec = EmulatedContractPublishSpecification {
+                contract_name: ContractName::from_literal("__transient"),
+                emulated_sender: deployer.clone(),
+                source: "(define-read-only (get-value) u1)".into(),
+                clarity_version,
+                location: "transient.clar".into(),
+                skip_analysis: false,
+                remap_principals: BTreeMap::new(),
+            };
+
+            let result = handle_emulated_contract_publish(&mut session, &spec, None, epoch);
+            if epoch == StacksEpochId::Epoch41 {
+                let errors = result.unwrap_err();
+                assert!(errors[0]
+                    .diagnostic
+                    .message
+                    .contains("Transient contract not supported in Epoch 4.1"));
+                assert_eq!(session.get_nonce(&principal).unwrap(), 0);
+                let id = QualifiedContractIdentifier::new(deployer, spec.contract_name.clone());
+                assert!(!session.contracts.contains_key(&id));
+            } else {
+                result.unwrap();
+                assert_eq!(session.get_nonce(&principal).unwrap(), 1);
+            }
+            assert_eq!(session.get_tx_sender(), sender);
+
+            let before = session.get_nonce(&principal).unwrap();
+            spec.contract_name = ContractName::from_literal("ordinary");
+            handle_emulated_contract_publish(&mut session, &spec, None, epoch).unwrap();
+            assert_eq!(session.get_nonce(&principal).unwrap(), before + 1);
+            assert_eq!(session.get_tx_sender(), sender);
+        }
+    }
+
     fn deploy_contract(
         session: &mut Session,
         name: &str,

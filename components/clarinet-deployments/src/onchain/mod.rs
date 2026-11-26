@@ -323,11 +323,12 @@ fn target_epoch(
     batch_epoch: Option<EpochSpec>,
     live_epoch: Option<StacksEpochId>,
 ) -> StacksEpochId {
-    let planned = planned_batch_epoch(batch_epoch, network);
     match (network, live_epoch) {
-        (StacksNetwork::Devnet, Some(active)) => planned.max(active),
+        (StacksNetwork::Devnet, Some(active)) => {
+            planned_batch_epoch(batch_epoch, network).max(active)
+        }
         (_, Some(active)) => active,
-        (_, None) => planned,
+        (_, None) => planned_batch_epoch(batch_epoch, network),
     }
 }
 
@@ -521,7 +522,8 @@ fn encode_transactions(
         None => public_network_epoch(deployment, stacks_rpc)?,
     };
 
-    // Validate every project publish before reading nonces or signing any transaction.
+    // Preflight all publishes before reading nonces, signing, or sending BTC.
+    let mut published_requirements = VecDeque::new();
     for batch in &deployment.plan.batches {
         if let (Some(config), Some(epoch)) = (devnet, batch.epoch) {
             if epoch.start_height(config).is_none() {
@@ -530,9 +532,27 @@ fn encode_transactions(
         }
         let epoch = target_epoch(&deployment.network, batch.epoch, live_epoch);
         for tx in &batch.transactions {
-            if let TransactionSpecification::ContractPublish(tx) = tx {
-                publish_clarity_version(tx.clarity_version, epoch)
-                    .map_err(|e| format!("{}: {e}", tx.contract_name))?;
+            match tx {
+                TransactionSpecification::ContractPublish(tx) => {
+                    publish_clarity_version(tx.clarity_version, epoch)
+                        .map_err(|e| format!("{}: {e}", tx.contract_name))?;
+                }
+                TransactionSpecification::RequirementPublish(tx) => {
+                    if matches!(deployment.network, StacksNetwork::Mainnet) {
+                        panic!("Deployment specification malformed - requirements publish not supported on mainnet");
+                    }
+                    let published = is_contract_published(
+                        stacks_rpc,
+                        &tx.remap_sender.to_address(),
+                        &tx.contract_id.name,
+                    )?;
+                    if !published {
+                        publish_clarity_version(tx.clarity_version, epoch)
+                            .map_err(|e| format!("requirement {}: {e}", tx.contract_id))?;
+                    }
+                    published_requirements.push_back(published);
+                }
+                _ => {}
             }
         }
     }
@@ -738,9 +758,6 @@ fn encode_transactions(
                     }
                 }
                 TransactionSpecification::RequirementPublish(tx) => {
-                    if matches!(network, StacksNetwork::Mainnet) {
-                        panic!("Deployment specification malformed - requirements publish not supported on mainnet");
-                    }
                     let old_contract_id = tx.contract_id.to_string();
                     let new_contract_id = QualifiedContractIdentifier::new(
                         tx.remap_sender.clone(),
@@ -750,7 +767,10 @@ fn encode_transactions(
                     contracts_ids_to_remap.insert(old_contract_id, new_contract_id);
 
                     let issuer_address = tx.remap_sender.to_address();
-                    if is_contract_published(stacks_rpc, &issuer_address, &tx.contract_id.name)? {
+                    if published_requirements
+                        .pop_front()
+                        .expect("every requirement was preflighted in plan order")
+                    {
                         continue;
                     }
                     let clarity_version = publish_clarity_version(tx.clarity_version, epoch.into())
@@ -1318,6 +1338,202 @@ mod tests {
         assert!(error.contains("old-contract"), "{error}");
         assert!(error.contains("Clarity 6"), "{error}");
         nonce.assert();
+    }
+
+    fn requirement_deployment(
+        network: StacksNetwork,
+        version: ClarityVersion,
+    ) -> (DeploymentSpecification, NetworkManifest) {
+        let mut manifest = test_network_manifest();
+        manifest.devnet.as_mut().unwrap().epoch_4_1 = Some(0);
+        let mut deployment = deployment_with_remaps(network, None);
+        deployment
+            .plan
+            .batches
+            .push(TransactionsBatchSpecification {
+                id: 0,
+                epoch: Some(EpochSpec::Epoch4_1),
+                transactions: vec![TransactionSpecification::RequirementPublish(
+                    RequirementPublishSpecification {
+                        contract_id: QualifiedContractIdentifier::parse(&format!(
+                            "{SBTC_MAINNET_ADDRESS}.requirement"
+                        ))
+                        .unwrap(),
+                        remap_sender: PrincipalData::parse_standard_principal(TEST_DEPLOYER)
+                            .unwrap(),
+                        remap_principals: BTreeMap::new(),
+                        source: "(define-read-only (get-value) u1)".into(),
+                        clarity_version: version,
+                        cost: 0,
+                        location: "requirement.clar".into(),
+                    },
+                )],
+            });
+        (deployment, manifest)
+    }
+
+    fn mock_epoch_41_node(server: &mut mockito::Server) {
+        server
+            .mock("GET", "/v2/info")
+            .with_header("content-type", "application/json")
+            .with_body(serde_json::to_string(&NodeInfo::default()).unwrap())
+            .create();
+        server
+            .mock("GET", "/v2/pox")
+            .with_header("content-type", "application/json")
+            .with_body(pox_response(StacksEpochId::Epoch41).to_string())
+            .create();
+    }
+
+    #[test]
+    fn preflights_requirements_before_btc_transfers() {
+        for network in [StacksNetwork::Testnet, StacksNetwork::Devnet] {
+            for (status, expected_error) in [(404, "Clarity 6"), (500, "unable to check whether")] {
+                let mut server = mockito::Server::new();
+                mock_epoch_41_node(&mut server);
+                let (mut deployment, manifest) =
+                    requirement_deployment(network.clone(), ClarityVersion::Clarity6);
+                deployment.plan.batches[0].transactions.insert(
+                    0,
+                    TransactionSpecification::BtcTransfer(crate::types::BtcTransferSpecification {
+                        expected_sender: manifest.accounts["deployer"].btc_address.clone(),
+                        recipient: manifest.accounts["deployer"].btc_address.clone(),
+                        sats_amount: 1,
+                        sats_per_byte: 1,
+                    }),
+                );
+                let presence = server
+                    .mock(
+                        "GET",
+                        format!("/v2/contracts/source/{TEST_DEPLOYER}/requirement").as_str(),
+                    )
+                    .with_status(status)
+                    .expect(if status == 404 {
+                        1
+                    } else {
+                        NODE_READ_RETRIES + 1
+                    })
+                    .create();
+                let nonce = server
+                    .mock("GET", mockito::Matcher::Regex("/v2/accounts/.*".into()))
+                    .expect(0)
+                    .create();
+                let btc = server
+                    .mock("POST", mockito::Matcher::Any)
+                    .expect(0)
+                    .create();
+                let (events, received) = std::sync::mpsc::channel();
+                let error = encode_transactions(
+                    &deployment,
+                    &manifest,
+                    &StacksRpc::new(&server.url()),
+                    &server.url(),
+                    &events,
+                )
+                .unwrap_err();
+                assert!(error.contains(expected_error), "{error}");
+                assert!(received.try_iter().next().is_none());
+                presence.assert();
+                nonce.assert();
+                btc.assert();
+            }
+        }
+    }
+
+    #[test]
+    fn preflights_requirements_once_and_preserves_remaps() {
+        for network in [StacksNetwork::Testnet, StacksNetwork::Devnet] {
+            for (published, version) in [
+                (true, ClarityVersion::Clarity6),
+                (false, ClarityVersion::Clarity7),
+            ] {
+                let mut server = mockito::Server::new();
+                mock_epoch_41_node(&mut server);
+                let (mut deployment, manifest) = requirement_deployment(network.clone(), version);
+                let source = format!(
+                    "(define-read-only (get-value) (contract-call? '{SBTC_MAINNET_ADDRESS}.requirement get-value))"
+                );
+                deployment.plan.batches[0].transactions.push(
+                    TransactionSpecification::ContractPublish(ContractPublishSpecification {
+                        contract_name: ContractName::try_from("consumer").unwrap(),
+                        expected_sender: PrincipalData::parse_standard_principal(TEST_DEPLOYER)
+                            .unwrap(),
+                        location: "consumer.clar".into(),
+                        source: source.clone(),
+                        clarity_version: ClarityVersion::Clarity7,
+                        cost: 0,
+                        anchor_block_only: true,
+                    }),
+                );
+                let presence = server
+                    .mock(
+                        "GET",
+                        format!("/v2/contracts/source/{TEST_DEPLOYER}/requirement").as_str(),
+                    )
+                    .with_status(if published { 200 } else { 404 })
+                    .with_header("content-type", "application/json")
+                    .with_body(
+                        r#"{"source":"(define-read-only (get-value) u1)","publish_height":1}"#,
+                    )
+                    .expect(1)
+                    .create();
+                let nonce = server
+                    .mock("GET", format!("/v2/accounts/{TEST_DEPLOYER}").as_str())
+                    .with_header("content-type", "application/json")
+                    .with_body(r#"{"balance":"0","nonce":0,"balance_proof":"","nonce_proof":""}"#)
+                    .expect(1)
+                    .create();
+                let (events, _) = std::sync::mpsc::channel();
+                let encoded = encode_transactions(
+                    &deployment,
+                    &manifest,
+                    &StacksRpc::new(&server.url()),
+                    "http://localhost:18443",
+                    &events,
+                )
+                .unwrap();
+                let trackers = &encoded[0].1;
+                assert_eq!(trackers.len(), if published { 1 } else { 2 });
+                if !published {
+                    let TransactionStatus::Encoded(tx, _) = &trackers[0].status else {
+                        panic!("requirement was not encoded");
+                    };
+                    assert_eq!(
+                        tx.payload,
+                        TransactionPayload::SmartContract(
+                            TransactionSmartContract {
+                                name: ContractName::try_from("requirement").unwrap(),
+                                code_body: StacksString::from_str(
+                                    "(define-read-only (get-value) u1)"
+                                )
+                                .unwrap(),
+                            },
+                            None,
+                        )
+                    );
+                }
+                let consumer = trackers.last().unwrap();
+                assert_eq!(consumer.index, 1);
+                let TransactionStatus::Encoded(tx, _) = &consumer.status else {
+                    panic!("consumer was not encoded");
+                };
+                assert_eq!(
+                    tx.payload,
+                    TransactionPayload::SmartContract(
+                        TransactionSmartContract {
+                            name: ContractName::try_from("consumer").unwrap(),
+                            code_body: StacksString::from_str(
+                                &source.replace(SBTC_MAINNET_ADDRESS, TEST_DEPLOYER)
+                            )
+                            .unwrap(),
+                        },
+                        None,
+                    )
+                );
+                presence.assert();
+                nonce.assert();
+            }
+        }
     }
 
     #[test]

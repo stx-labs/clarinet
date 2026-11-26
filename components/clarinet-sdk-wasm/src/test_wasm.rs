@@ -91,6 +91,57 @@ async fn it_can_deploy_contract() {
 }
 
 #[wasm_bindgen_test]
+async fn it_gates_transient_contract_deployments_at_epoch_41() {
+    const SENDER: &str = "ST1PQHQKV0RJXZFY1DGX8MNSNYVE3VGZJSRTPGZGM";
+    for (epoch, version) in [("4.0", 6), ("4.1", 7)] {
+        let mut sdk = init_sdk().await;
+        sdk.set_epoch(EpochString::new(epoch));
+        assert_eq!(sdk.current_epoch(), epoch);
+        let initial_sender = sdk.execute("tx-sender".into()).unwrap().result;
+        assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 0);
+
+        let deploy = |name: &str| {
+            DeployContractArgs::new(
+                name.into(),
+                "(define-read-only (get-value) u1)".into(),
+                ContractOptions::new(Some(version)),
+                SENDER.into(),
+                None,
+                None,
+            )
+        };
+        let result = sdk.deploy_contract(&deploy("__transient"));
+        if epoch == "4.1" {
+            let error = result.unwrap_err();
+            assert!(
+                error.contains("Transient contract not supported in Epoch 4.1"),
+                "{error}"
+            );
+            assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 0);
+        } else {
+            assert_tx_result(&result.unwrap(), ClarityValue::okay_true());
+            assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), 1);
+        }
+        assert_eq!(
+            sdk.execute("tx-sender".into()).unwrap().result,
+            initial_sender
+        );
+
+        let before = sdk.get_account_nonce(SENDER).unwrap();
+        assert_tx_result(
+            &sdk.deploy_contract(&deploy("ordinary")).unwrap(),
+            ClarityValue::okay_true(),
+        );
+        assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), before + 1);
+        assert_tx_result(
+            &sdk.execute("(+ u1 u2)".into()).unwrap(),
+            ClarityValue::UInt(3),
+        );
+        assert_eq!(sdk.get_account_nonce(SENDER).unwrap(), before + 1);
+    }
+}
+
+#[wasm_bindgen_test]
 async fn it_can_call_a_private_function() {
     let mut sdk = init_sdk().await;
     let _ = deploy_basic_contract(&mut sdk);

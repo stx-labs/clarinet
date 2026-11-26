@@ -7,6 +7,7 @@ use std::rc::Rc;
 use clarity::codec::StacksMessageCodec;
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
+use clarity::vm::contexts::TRANSIENT_CONTRACT_NAME;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::hooks::EvalHook;
 use clarity::vm::types::BoundedErrorString;
@@ -938,6 +939,21 @@ impl Session {
                     "{} can not be used with {}",
                     contract.clarity_version,
                     contract.epoch
+                ),
+                spans: vec![],
+                suggestion: None,
+            };
+            return Err(ExecutionError::rejected(vec![diagnostic]));
+        }
+
+        if current_epoch.rejects_transient_contracts()
+            && contract.name.as_str() == TRANSIENT_CONTRACT_NAME
+        {
+            let diagnostic = Diagnostic {
+                level: Level::Error,
+                message: bounded_format!(
+                    "Transient contract not supported in Epoch {}",
+                    current_epoch
                 ),
                 spans: vec![],
                 suggestion: None,
@@ -2432,10 +2448,67 @@ mod tests {
     }
 
     #[test]
+    fn transient_deploy_is_rejected_before_changing_sender_nonce_or_state() {
+        let mut session = Session::new_without_boot_contracts(SessionSettings {
+            epoch_id: Some(StacksEpochId::Epoch41),
+            ..SessionSettings::default()
+        });
+        let sender = session.get_tx_sender();
+        let deployer = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        assert_ne!(sender, deployer);
+        let mut contract = ClarityContractBuilder::new()
+            .name("__transient")
+            .deployer(deployer)
+            .epoch(StacksEpochId::Epoch41)
+            .clarity_version(ClarityVersion::Clarity7)
+            .build();
+        let contract_id = contract.expect_resolved_contract_identifier(None);
+
+        for skip_analysis in [false, true] {
+            contract.skip_analysis = skip_analysis;
+            let error = session
+                .deploy_contract_with_inclusion(
+                    &contract,
+                    false,
+                    None,
+                    PostConditionCheck::Unchecked,
+                    None,
+                )
+                .unwrap_err();
+            assert_eq!(
+                error.inclusion,
+                crate::repl::interpreter::BlockInclusion::Rejected
+            );
+            assert!(error.diagnostics[0]
+                .diagnostic
+                .message
+                .contains("Transient contract not supported in Epoch 4.1"));
+            assert_eq!(session.get_tx_sender(), sender);
+            assert_eq!(session.get_nonce(&principal(deployer)).unwrap(), 0);
+            assert!(!session.contracts.contains_key(&contract_id));
+        }
+
+        assert_eq!(
+            run_session_snippet(&mut session, "(+ u1 u2)"),
+            Value::UInt(3)
+        );
+        assert_eq!(session.get_tx_sender(), sender);
+        assert_eq!(session.get_nonce(&principal(&sender)).unwrap(), 0);
+    }
+
+    #[test]
     fn boot_contracts_do_not_bump_a_nonce() {
         // Boot contracts are genesis state on mainnet, not transactions, and
         // they bypass `deploy_contract` entirely.
-        let mut session = Session::new(SessionSettings::default());
+        let mut session = Session::new(SessionSettings {
+            epoch_id: Some(StacksEpochId::Epoch41),
+            ..SessionSettings::default()
+        });
+
+        for address in [BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS] {
+            let id = QualifiedContractIdentifier::parse(&format!("{address}.pox-4")).unwrap();
+            assert!(session.boot_contracts.contains_key(&id));
+        }
 
         for addr in [BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS] {
             assert_eq!(session.get_nonce(&principal(addr)).unwrap(), 0);
