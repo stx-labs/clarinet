@@ -419,8 +419,10 @@ fn displays_clarity_docs() {
         &[
             "::describe tx-sender",
             "::describe +",
+            "::describe <= (less than or equal)",
             "::describe not-a-clarity-name",
             "::keywords",
+            "::functions",
         ],
     )
     .join("\n");
@@ -429,8 +431,13 @@ fn displays_clarity_docs() {
         "{output}"
     );
     assert!(output.contains("\nUsage\n(+ i1 i2...)\n"), "{output}");
+    assert!(output.contains("\nUsage\n(<= i1 i2)\n"), "{output}");
     assert!(
         output.contains("\nIt looks like there aren't matches for your search\nblock-height\n"),
+        "{output}"
+    );
+    assert!(
+        output.contains("\ntx-sponsor?\n* (multiply)\n+ (add)\n- (subtract)\n"),
         "{output}"
     );
 }

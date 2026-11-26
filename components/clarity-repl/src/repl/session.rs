@@ -1898,8 +1898,8 @@ impl Session {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn display_doc(&self, command: &str) -> Result<String, String> {
-        let keyword = command.replace("::describe", "").replace(' ', "");
-        match docs::describe(&keyword) {
+        let keyword = command.trim_start_matches("::describe").trim();
+        match docs::describe(keyword) {
             Some(doc) => Ok(doc.yellow().to_string()),
             None => Err("It looks like there aren't matches for your search"
                 .red()
