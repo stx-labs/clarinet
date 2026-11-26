@@ -81,11 +81,19 @@ fn normalize_description(description: &str) -> String {
     description.replace('\n', " ")
 }
 
+fn availability(min_version: ClarityVersion, max_version: Option<ClarityVersion>) -> String {
+    match max_version {
+        Some(max_version) => format!("Available since {min_version} through {max_version}"),
+        None => format!("Available since {min_version}"),
+    }
+}
+
 fn format_api_doc(function_api: FunctionAPI) -> (String, Entry) {
     let description = normalize_description(&function_api.description);
+    let availability = availability(function_api.min_version, function_api.max_version);
     let doc = format!(
-        "Usage\n{}\n\nDescription\n{}\n\nExamples\n{}",
-        function_api.signature, description, function_api.example
+        "Usage\n{}\n\nClarity version\n{availability}\n\nDescription\n{description}\n\nExamples\n{}",
+        function_api.signature, function_api.example
     );
     let entry = Entry {
         doc,
@@ -113,7 +121,11 @@ fn clarity_keywords() -> BTreeMap<String, Entry> {
         .filter_map(make_keyword_reference)
         .map(|key| {
             let description = normalize_description(key.description);
-            let doc = format!("Description\n{}\n\nExamples\n{}", description, key.example);
+            let availability = availability(key.min_version, key.max_version);
+            let doc = format!(
+                "Clarity version\n{availability}\n\nDescription\n{description}\n\nExamples\n{}",
+                key.example
+            );
             let entry = Entry {
                 doc,
                 min_version: key.min_version,
@@ -170,7 +182,9 @@ mod tests {
     #[test]
     fn describe_finds_functions_and_keywords() {
         assert!(describe("map").unwrap().starts_with("Usage\n(map "));
-        assert!(describe("tx-sender").unwrap().starts_with("Description\n"));
+        assert!(describe("tx-sender")
+            .unwrap()
+            .starts_with("Clarity version\nAvailable since Clarity 1\n\nDescription\n"));
         assert_eq!(describe("not-a-clarity-name"), None);
     }
 
@@ -179,6 +193,16 @@ mod tests {
         assert_eq!(describe("+"), describe("+ (add)"));
         assert!(describe("<").unwrap().starts_with("Usage\n(< "));
         assert!(describe("<=").unwrap().starts_with("Usage\n(<= "));
+    }
+
+    #[test]
+    fn describe_shows_availability() {
+        assert!(describe("block-height")
+            .unwrap()
+            .starts_with("Clarity version\nAvailable since Clarity 1 through Clarity 2\n"));
+        assert!(describe("as-contract?")
+            .unwrap()
+            .contains("\n\nClarity version\nAvailable since Clarity 4\n\nDescription\n"));
     }
 
     #[test]

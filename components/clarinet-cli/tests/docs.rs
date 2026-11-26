@@ -68,7 +68,9 @@ fn rejects_an_unknown_version() {
 fn describes_names_from_any_version() {
     let output = run_docs(&["block-height"]);
     assert!(output.status.success());
-    assert!(stdout(&output).starts_with("# block-height\n"));
+    assert!(stdout(&output).starts_with(
+        "# block-height\nClarity version\nAvailable since Clarity 1 through Clarity 2\n"
+    ));
 }
 
 #[test]
