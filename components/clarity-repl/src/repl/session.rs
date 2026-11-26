@@ -421,9 +421,16 @@ impl Session {
             "::help" => Ok(self.display_help()),
 
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::functions") => self.display_functions(cmd),
+            cmd if cmd.starts_with("::functions") => display_index(
+                cmd,
+                "::functions",
+                "Native functions",
+                docs::functions_index,
+            ),
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::keywords") => self.keywords(cmd),
+            cmd if cmd.starts_with("::keywords") => {
+                display_index(cmd, "::keywords", "Keywords", docs::keywords_index)
+            }
             #[cfg(not(target_arch = "wasm32"))]
             cmd if cmd.starts_with("::describe") => self.display_doc(cmd),
             #[cfg(not(target_arch = "wasm32"))]
@@ -1885,26 +1892,6 @@ impl Session {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn display_functions(&self, command: &str) -> Result<String, String> {
-        let versions = parse_clarity_versions(command.trim_start_matches("::functions"))?;
-        let names: Vec<_> = docs::functions_index(versions).collect();
-        Ok(format!(
-            "Native functions in {versions} (`::functions <version|all>` to list another version)\n{}",
-            names.join("\n").yellow()
-        ))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn keywords(&self, command: &str) -> Result<String, String> {
-        let versions = parse_clarity_versions(command.trim_start_matches("::keywords"))?;
-        let names: Vec<_> = docs::keywords_index(versions).collect();
-        Ok(format!(
-            "Keywords in {versions} (`::keywords <version|all>` to list another version)\n{}",
-            names.join("\n").yellow()
-        ))
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     fn display_doc(&self, command: &str) -> Result<String, String> {
         let keyword = command.trim_start_matches("::describe").trim();
         match docs::describe(keyword) {
@@ -1931,11 +1918,21 @@ impl Session {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn parse_clarity_versions(args: &str) -> Result<docs::ClarityVersions, String> {
-    match args.trim() {
-        "" => Ok(docs::ClarityVersions::default()),
-        args => args.parse().map_err(|err: String| err.red().to_string()),
-    }
+fn display_index<I: Iterator<Item = &'static str>>(
+    command: &str,
+    prefix: &str,
+    title: &str,
+    index: fn(docs::ClarityVersions) -> I,
+) -> Result<String, String> {
+    let versions = match command.trim_start_matches(prefix).trim() {
+        "" => docs::ClarityVersions::default(),
+        args => args.parse().map_err(|err: String| err.red().to_string())?,
+    };
+    let names: Vec<_> = index(versions).collect();
+    Ok(format!(
+        "{title} in {versions} (`{prefix} <version|all>` to list another version)\n{}",
+        names.join("\n").yellow()
+    ))
 }
 
 #[derive(Debug, PartialEq)]

@@ -62,57 +62,47 @@ impl fmt::Display for ClarityVersions {
     }
 }
 
-enum Item {
-    Function(NativeFunctions),
-    Define,
-    Keyword(NativeVariables),
-}
-
-impl Item {
-    fn is_in(&self, versions: ClarityVersions) -> bool {
-        let ClarityVersions::Only(version) = versions else {
-            return true;
-        };
+impl ClarityVersions {
+    fn include(self, min: ClarityVersion, max: Option<ClarityVersion>) -> bool {
         match self {
-            Self::Function(function) => {
-                NativeFunctions::lookup_by_name_at_version(function.get_name_str(), &version)
-                    .is_some()
-            }
-            Self::Define => true,
-            Self::Keyword(keyword) => {
-                NativeVariables::lookup_by_name_at_version(keyword.get_name_str(), &version)
-                    .is_some()
-            }
+            Self::Only(version) => min <= version && max.is_none_or(|max| version <= max),
+            Self::All => true,
         }
     }
 }
 
 struct Entry {
     doc: String,
-    item: Item,
+    min_version: ClarityVersion,
+    max_version: Option<ClarityVersion>,
 }
 
 fn normalize_description(description: &str) -> String {
     description.replace('\n', " ")
 }
 
-fn format_api_doc(function_api: &FunctionAPI, item: Item) -> (String, Entry) {
+fn format_api_doc(function_api: FunctionAPI) -> (String, Entry) {
     let description = normalize_description(&function_api.description);
     let doc = format!(
         "Usage\n{}\n\nDescription\n{}\n\nExamples\n{}",
         function_api.signature, description, function_api.example
     );
-    (function_api.name.clone(), Entry { doc, item })
+    let entry = Entry {
+        doc,
+        min_version: function_api.min_version,
+        max_version: function_api.max_version,
+    };
+    (function_api.name, entry)
 }
 
 fn build_api_reference() -> BTreeMap<String, Entry> {
     NativeFunctions::ALL
         .iter()
-        .map(|func| format_api_doc(&make_api_reference(func), Item::Function(*func)))
+        .map(|func| format_api_doc(make_api_reference(func)))
         .chain(
             DefineFunctions::ALL
                 .iter()
-                .map(|func| format_api_doc(&make_define_reference(func), Item::Define)),
+                .map(|func| format_api_doc(make_define_reference(func))),
         )
         .collect()
 }
@@ -120,12 +110,16 @@ fn build_api_reference() -> BTreeMap<String, Entry> {
 fn clarity_keywords() -> BTreeMap<String, Entry> {
     NativeVariables::ALL
         .iter()
-        .filter_map(|variable| Some((*variable, make_keyword_reference(variable)?)))
-        .map(|(variable, key)| {
+        .filter_map(make_keyword_reference)
+        .map(|key| {
             let description = normalize_description(key.description);
             let doc = format!("Description\n{}\n\nExamples\n{}", description, key.example);
-            let item = Item::Keyword(variable);
-            (key.name.to_string(), Entry { doc, item })
+            let entry = Entry {
+                doc,
+                min_version: key.min_version,
+                max_version: key.max_version,
+            };
+            (key.name.to_string(), entry)
         })
         .collect()
 }
@@ -140,7 +134,7 @@ fn index(
 ) -> impl Iterator<Item = &'static str> {
     reference
         .iter()
-        .filter(move |(_, entry)| entry.item.is_in(versions))
+        .filter(move |(_, entry)| versions.include(entry.min_version, entry.max_version))
         .map(|(name, _)| name.as_str())
 }
 
