@@ -45,7 +45,7 @@ fn lists_functions_then_keywords_of_the_default_version() {
 
 #[test]
 fn lists_another_version_or_all_of_them() {
-    let clarity1 = lines(&run_docs(&["--clarity-version", "1"]));
+    let clarity1 = lines(&run_docs(&["-c", "1"]));
     assert!(clarity1[0].starts_with("Functions and keywords in Clarity 1 ("));
     assert!(clarity1.iter().any(|l| l == "block-height"));
     assert!(!clarity1.iter().any(|l| l == "stacks-block-height"));

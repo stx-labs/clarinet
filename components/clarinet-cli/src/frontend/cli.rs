@@ -501,15 +501,16 @@ struct ApplyDeployment {
 
 #[derive(Parser, PartialEq, Clone, Debug)]
 #[clap(
-    after_help = "Examples:\n  clarinet docs\n  clarinet docs --clarity-version all\n  clarinet docs 'as-contract?' with-stx"
+    after_help = "Examples:\n  clarinet docs\n  clarinet docs -c 3\n  clarinet docs --clarity-version all\n  clarinet docs 'as-contract?' with-stx"
 )]
 struct Docs {
     /// Functions or keywords to describe; lists them all when omitted
     #[clap(value_name = "NAME")]
     pub names: Vec<String>,
-    /// Clarity version to list, as a number or `all` [default: the version new contracts use]
+    /// Clarity version to list: a number (`3`), a name (`clarity3`) or `all` [default: the version new contracts use]
     #[clap(
         long = "clarity-version",
+        short = 'c',
         value_name = "VERSION",
         conflicts_with = "names"
     )]
