@@ -77,14 +77,36 @@ struct Entry {
     max_version: Option<ClarityVersion>,
 }
 
-fn normalize_description(description: &str) -> String {
-    description.replace('\n', " ")
-}
-
-fn availability(min_version: ClarityVersion, max_version: Option<ClarityVersion>) -> String {
-    match max_version {
-        Some(max_version) => format!("Available since {min_version} through {max_version}"),
-        None => format!("Available since {min_version}"),
+impl Entry {
+    /// Keywords have no `usage`.
+    fn new(
+        usage: Option<&str>,
+        description: &str,
+        example: &str,
+        min_version: ClarityVersion,
+        max_version: Option<ClarityVersion>,
+    ) -> Self {
+        let availability = match max_version {
+            Some(max_version) => format!("Available since {min_version} through {max_version}"),
+            None => format!("Available since {min_version}"),
+        };
+        let sections = [
+            usage.map(|usage| ("Usage", clarity_block(usage))),
+            Some(("Clarity version", availability)),
+            Some(("Description", description.replace('\n', " "))),
+            Some(("Examples", clarity_block(example))),
+        ];
+        let doc = sections
+            .into_iter()
+            .flatten()
+            .map(|(title, body)| format!("## {title}\n{body}"))
+            .collect::<Vec<_>>()
+            .join("\n\n");
+        Self {
+            doc,
+            min_version,
+            max_version,
+        }
     }
 }
 
@@ -92,30 +114,25 @@ fn clarity_block(code: &str) -> String {
     format!("```clarity\n{}\n```", code.trim())
 }
 
-fn format_api_doc(function_api: FunctionAPI) -> (String, Entry) {
-    let description = normalize_description(&function_api.description);
-    let availability = availability(function_api.min_version, function_api.max_version);
-    let doc = format!(
-        "## Usage\n{}\n\n## Clarity version\n{availability}\n\n## Description\n{description}\n\n## Examples\n{}",
-        clarity_block(&function_api.signature),
-        clarity_block(&function_api.example)
+fn function_entry(api: FunctionAPI) -> (String, Entry) {
+    let entry = Entry::new(
+        Some(&api.signature),
+        &api.description,
+        &api.example,
+        api.min_version,
+        api.max_version,
     );
-    let entry = Entry {
-        doc,
-        min_version: function_api.min_version,
-        max_version: function_api.max_version,
-    };
-    (function_api.name, entry)
+    (api.name, entry)
 }
 
 fn build_api_reference() -> BTreeMap<String, Entry> {
     NativeFunctions::ALL
         .iter()
-        .map(|func| format_api_doc(make_api_reference(func)))
+        .map(|func| function_entry(make_api_reference(func)))
         .chain(
             DefineFunctions::ALL
                 .iter()
-                .map(|func| format_api_doc(make_define_reference(func))),
+                .map(|func| function_entry(make_define_reference(func))),
         )
         .collect()
 }
@@ -125,17 +142,13 @@ fn clarity_keywords() -> BTreeMap<String, Entry> {
         .iter()
         .filter_map(make_keyword_reference)
         .map(|key| {
-            let description = normalize_description(key.description);
-            let availability = availability(key.min_version, key.max_version);
-            let doc = format!(
-                "## Clarity version\n{availability}\n\n## Description\n{description}\n\n## Examples\n{}",
-                clarity_block(key.example)
+            let entry = Entry::new(
+                None,
+                key.description,
+                key.example,
+                key.min_version,
+                key.max_version,
             );
-            let entry = Entry {
-                doc,
-                min_version: key.min_version,
-                max_version: key.max_version,
-            };
             (key.name.to_string(), entry)
         })
         .collect()

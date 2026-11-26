@@ -3,18 +3,18 @@ use std::process::{Command, Output};
 
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 
-fn run_docs_in(dir: &Path, names: &[&str]) -> Output {
+fn run_docs_in(dir: &Path, args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_clarinet"))
         .arg("docs")
-        .args(names)
+        .args(args)
         .current_dir(dir)
         .output()
         .expect("Failed to run clarinet docs")
 }
 
-fn run_docs(names: &[&str]) -> Output {
+fn run_docs(args: &[&str]) -> Output {
     let temp_dir = tempfile::tempdir().unwrap();
-    run_docs_in(temp_dir.path(), names)
+    run_docs_in(temp_dir.path(), args)
 }
 
 fn stdout(output: &Output) -> String {
