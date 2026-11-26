@@ -45,10 +45,9 @@ stacks-transactions = { workspace = true }
 rusqlite = { version = "0.41.1", features = ["bundled"] }
 pox-locking = { workspace = true, default-features = true }
 
-comfy-table = "=7.2.2"
+comfy-table = "8.0.1"
 hiro-system-kit = { path = "../hiro-system-kit", default-features = false }
-pico-args = { version = "0.5.0" }
-rustyline = { version = "17.0.2" }
+rustyline = { version = "19.0.0", default-features = false, features = ["with-file-history"] }
 
 # DAP Debugger
 tokio = { workspace = true, optional = true}
@@ -67,7 +66,7 @@ stacks-codec = { workspace = true, features = ["wasm-web"] }
 stacks-transactions = { workspace = true, features = ["wasm-web"] }
 pox-locking = { workspace = true, default-features = false }
 
-comfy-table = { version = "=7.2.2", default-features = false }
+comfy-table = { version = "8.0.1", default-features = false }
 js-sys = { workspace = true }
 hiro-system-kit = { path = "../hiro-system-kit", default-features = false }
 serde-wasm-bindgen = { workspace = true }

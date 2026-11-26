@@ -72,11 +72,19 @@ pub fn mnemonic_from_phrase(phrase: &str) -> Result<String, String> {
     parse_mnemonic(phrase).map(|mnemonic| mnemonic.to_string())
 }
 
-pub fn random_mnemonic() -> String {
+/// Fills a buffer from the operating system's CSPRNG.
+fn random_bytes<const N: usize>() -> Result<[u8; N], getrandom::Error> {
+    let mut bytes = [0u8; N];
+    getrandom::fill(&mut bytes)?;
+    Ok(bytes)
+}
+
+pub fn random_mnemonic() -> Result<String, String> {
     // 16 bytes = 128 bits = 12 words
-    Mnemonic::from_entropy(&rand::random::<[u8; 16]>())
-        .unwrap()
-        .to_string()
+    let entropy = random_bytes::<16>().map_err(|e| e.to_string())?;
+    Mnemonic::from_entropy(&entropy)
+        .map(|mnemonic| mnemonic.to_string())
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -182,6 +190,8 @@ pub enum MnemonicEncryptionError {
     Argon2(Argon2Error),
     Bs58Decode(bs58::decode::Error),
     Mnemonic(MnemonicError),
+    /// The operating system could not provide random bytes
+    Random(getrandom::Error),
     Utf8(std::str::Utf8Error),
     /// The ciphertext did not survive a base58 round trip
     DecodingMismatch,
@@ -212,6 +222,12 @@ impl From<bs58::decode::Error> for MnemonicEncryptionError {
 impl From<MnemonicError> for MnemonicEncryptionError {
     fn from(e: MnemonicError) -> Self {
         Self::Mnemonic(e)
+    }
+}
+
+impl From<getrandom::Error> for MnemonicEncryptionError {
+    fn from(e: getrandom::Error) -> Self {
+        Self::Random(e)
     }
 }
 
@@ -255,12 +271,12 @@ fn encrypt(
     let key = if strength == MnemonicEncryptionStrength::Basic {
         derive_key(password, strength, DEFAULT_SALT)?
     } else {
-        let salt: [u8; SALT_SIZE] = rand::random();
+        let salt = random_bytes::<SALT_SIZE>()?;
         bytes.extend_from_slice(&salt);
         derive_key(password, strength, &salt)?
     };
 
-    let nonce: [u8; AES_GCM_NONCE_SIZE] = rand::random();
+    let nonce = random_bytes::<AES_GCM_NONCE_SIZE>()?;
     let ciphertext = Aes256Gcm::new((&key).into()).encrypt(&Nonce::from(nonce), data)?;
 
     bytes.extend_from_slice(&nonce);
@@ -383,7 +399,7 @@ mod tests {
 
     #[test]
     fn test_random_mnemonic_12() {
-        assert_eq!(random_mnemonic().split_whitespace().count(), 12);
+        assert_eq!(random_mnemonic().unwrap().split_whitespace().count(), 12);
     }
 
     #[test]

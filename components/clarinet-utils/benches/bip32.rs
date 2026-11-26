@@ -26,9 +26,11 @@ fn main() {
 /// A mnemonic no cache has seen: the full derivation.
 #[divan::bench]
 fn uncached(bencher: divan::Bencher) {
-    bencher.with_inputs(random_mnemonic).bench_values(|phrase| {
-        get_bip32_keys_from_mnemonic(&phrase, DEFAULT_DERIVATION_PATH).unwrap()
-    });
+    bencher
+        .with_inputs(|| random_mnemonic().unwrap())
+        .bench_values(|phrase| {
+            get_bip32_keys_from_mnemonic(&phrase, DEFAULT_DERIVATION_PATH).unwrap()
+        });
 }
 
 /// A mnemonic Clarinet ships: resolved from the compile-time table.

@@ -1,9 +1,12 @@
+use std::time::Duration;
+
 use clarinet_files::StacksNetwork;
 use clarity::util::hash::{bytes_to_hex, Hash160};
 use mac_address::get_mac_address;
-use segment::message::{Message, Track, User};
-use segment::{Client, HttpClient};
-use serde_json::json;
+use serde_json::{json, Value};
+
+const SEGMENT_HOST: &str = "https://api.segment.io";
+const SEGMENT_WRITE_KEY: &str = "Q3xpmFRvy0psXnwBEXErtMBIeabOVjbC";
 
 pub enum DeveloperUsageEvent {
     NewProject(DeveloperUsageDigest),
@@ -37,8 +40,6 @@ pub fn telemetry_report_event(event: DeveloperUsageEvent) {
 }
 
 async fn send_event(event: DeveloperUsageEvent) {
-    let segment_api_key = "Q3xpmFRvy0psXnwBEXErtMBIeabOVjbC";
-
     let clarinet_version = env!("CARGO_PKG_VERSION").to_string();
     let ci_mode = option_env!("CLARINET_MODE_CI").unwrap_or("0").to_string();
     let os = std::env::consts::OS;
@@ -135,19 +136,61 @@ async fn send_event(event: DeveloperUsageEvent) {
         Err(_e) => return,
     };
 
-    let client = HttpClient::default();
+    let user_id = format!("0x{}", bytes_to_hex(user_id.to_bytes().as_ref()));
 
-    let _ = client
-        .send(
-            segment_api_key.to_string(),
-            Message::from(Track {
-                user: User::UserId {
-                    user_id: format!("0x{}", bytes_to_hex(user_id.to_bytes().as_ref())),
-                },
-                event: event_name.into(),
-                properties,
-                ..Default::default()
-            }),
-        )
-        .await;
+    let _ = send_track(SEGMENT_HOST, &user_id, event_name, properties).await;
+}
+
+/// Posts a `track` call to Segment's HTTP tracking API.
+async fn send_track(
+    host: &str,
+    user_id: &str,
+    event: &str,
+    properties: Value,
+) -> reqwest::Result<reqwest::Response> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(10))
+        .build()?
+        .post(format!("{host}/v1/track"))
+        .basic_auth(SEGMENT_WRITE_KEY, Some(""))
+        .json(&json!({
+            "userId": user_id,
+            "event": event,
+            "properties": properties,
+        }))
+        .send()
+        .await
+}
+
+#[cfg(test)]
+mod tests {
+    use mockito::Matcher;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn posts_a_segment_track_call() {
+        let mut server = mockito::Server::new_async().await;
+        let mock = server
+            .mock("POST", "/v1/track")
+            // base64 of "<write key>:"
+            .match_header(
+                "authorization",
+                "Basic UTN4cG1GUnZ5MHBzWG53QkVYRXJ0TUJJZWFiT1ZqYkM6",
+            )
+            .match_body(Matcher::Json(json!({
+                "userId": "0xabc",
+                "event": "CheckExecuted",
+                "properties": { "project_id": "0x01", "sessions": 2 },
+            })))
+            .create_async()
+            .await;
+
+        let properties = json!({ "project_id": "0x01", "sessions": 2 });
+        send_track(&server.url(), "0xabc", "CheckExecuted", properties)
+            .await
+            .unwrap();
+
+        mock.assert_async().await;
+    }
 }

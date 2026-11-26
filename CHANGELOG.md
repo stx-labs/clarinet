@@ -1,3 +1,41 @@
+# [4.1.0](https://github.com/stx-labs/clarinet/compare/v4.0.0...v4.1.0) (2026-11-25)
+
+### New Features
+
+*  Add one-shot evaluation to `clarinet console` (#2680) (a89de7e2)
+*  Add contract address remapping (#2607) (58edbbcf)
+
+### Bug Fixes
+
+* **format:**
+  *  Report a contract that doesn't parse instead of panicking (#2666) (51c0bf8a)
+  *  Measure list items as they print, so tuple constructors format stably (#2663) (59d74a42)
+* **files:**
+  *  Improve error messages on malformed network manifests (#2654) (e26b3cf2)
+* **sdk:**
+  *  Enable coverage hook in `initEmptySession` (#2650) (65762f2e)
+*  Fail devnet when a node container exits instead of hanging (#2643) (cc739bd9)
+*  Export snapshot events from the actual stacks-api container (#2649) (c0dfaa8b)
+*  Show note diagnostics in `clarinet check` without warnings (#2656) (6e253316)
+*  Skip parsing untracked costs in `parseCosts` (#2644) (e3feba23)
+
+### Performance Improvements
+
+*  Reduce size of SDK Wasm by 12% (#2660) (190a973b)
+
+### Refactors
+
+*  Drop the docker CLI dependency from devnet (#2645) (37fad32c)
+*  Replace `libyaml-rs` with `serde-saphyr` (#2615) (424a8ab1)
+*  Simplify clarinet-utils and upgrade its crypto crates (#2675) (faf8cdf4)
+
+### Chores
+
+*  Reduce cargo dependencies (#2689) (9360bd8f)
+*  Fix new warnings from Rust 1.100 update (#2673) (0ed6378d)
+*  Improve string handling with new Rust 1.100 functions (#2674) (8da25229)
+*  Add clarinet-cli agent skill for better e2e (#2613) (0047d996)
+
 # [4.0.0](https://github.com/stx-labs/clarinet/compare/v3.26.0...v4.0.0) (2026-10-29)
 
 ### Breaking Changes

@@ -11,7 +11,7 @@ pub struct ClarinetRC {
 
 impl ClarinetRC {
     pub fn get_config_dir() -> Option<PathBuf> {
-        dirs::home_dir().map(|h| h.join(".clarinet"))
+        env::home_dir().map(|h| h.join(".clarinet"))
     }
 
     pub fn get_settings_file_path() -> Option<PathBuf> {
