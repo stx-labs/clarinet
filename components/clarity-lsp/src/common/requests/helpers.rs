@@ -5,6 +5,20 @@ use clarity_types::representations::Span;
 use clarity_types::ClarityName;
 use ls_types::{Position, Range};
 
+/// The byte offset in `line` of an LSP column. Columns count UTF-16 code
+/// units, so after a non-ASCII character they no longer match bytes and
+/// slicing by the column panics. Past the end it's the line's length.
+pub fn column_to_byte(line: &str, column: u32) -> usize {
+    let mut units = 0;
+    line.char_indices()
+        .find(|(_, c)| {
+            let reached = units >= column as usize;
+            units += c.len_utf16();
+            reached
+        })
+        .map_or(line.len(), |(byte, _)| byte)
+}
+
 pub fn span_to_range(span: &Span) -> Range {
     if span == &Span::zero() {
         return Range::default();
@@ -102,4 +116,20 @@ pub fn get_atom_or_field_start_at_position(
         }
     }
     None
+}
+
+#[cfg(test)]
+mod column_to_byte_tests {
+    use super::column_to_byte;
+
+    #[test]
+    fn counts_utf16_units() {
+        let line = ";; café 😀 x";
+        assert_eq!(column_to_byte(line, 3), 3);
+        // "é" is one unit and two bytes
+        assert_eq!(column_to_byte(line, 7), 8);
+        // "😀" is two units and four bytes
+        assert_eq!(column_to_byte(line, 10), 13);
+        assert_eq!(column_to_byte(line, 99), line.len());
+    }
 }
