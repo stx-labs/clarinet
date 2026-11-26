@@ -1886,34 +1886,24 @@ impl Session {
 
     #[cfg(not(target_arch = "wasm32"))]
     fn display_functions(&self) -> String {
-        format!("{}", docs::functions_index().join("\n").yellow())
+        let names: Vec<_> = docs::functions_index().collect();
+        names.join("\n").yellow().to_string()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn keywords(&self) -> String {
-        format!("{}", docs::keywords_index().join("\n").yellow())
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn lookup_functions_or_keywords_docs(&self, exp: &str) -> Option<&str> {
-        docs::describe(exp)
+        let names: Vec<_> = docs::keywords_index().collect();
+        names.join("\n").yellow().to_string()
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn display_doc(&self, command: &str) -> Result<String, String> {
-        let keyword = {
-            let mut s = command.to_string();
-            s = s.replace("::describe", "");
-            s = s.replace(' ', "");
-            s
-        };
-
-        match self.lookup_functions_or_keywords_docs(&keyword) {
-            Some(doc) => Ok(format!("{}", doc.yellow())),
-            None => Err(format!(
-                "{}",
-                "It looks like there aren't matches for your search".red()
-            )),
+        let keyword = command.replace("::describe", "").replace(' ', "");
+        match docs::describe(&keyword) {
+            Some(doc) => Ok(doc.yellow().to_string()),
+            None => Err("It looks like there aren't matches for your search"
+                .red()
+                .to_string()),
         }
     }
 

@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::sync::LazyLock;
 
 use clarity::vm::docs::{
@@ -21,7 +21,7 @@ fn format_api_doc(function_api: &FunctionAPI) -> (String, String) {
     (function_api.name.clone(), doc)
 }
 
-fn build_api_reference() -> HashMap<String, String> {
+fn build_api_reference() -> BTreeMap<String, String> {
     NativeFunctions::ALL
         .iter()
         .map(|func| format_api_doc(&make_api_reference(func)))
@@ -33,7 +33,7 @@ fn build_api_reference() -> HashMap<String, String> {
         .collect()
 }
 
-fn clarity_keywords() -> HashMap<String, String> {
+fn clarity_keywords() -> BTreeMap<String, String> {
     NativeVariables::ALL
         .iter()
         .filter_map(make_keyword_reference)
@@ -45,34 +45,16 @@ fn clarity_keywords() -> HashMap<String, String> {
         .collect()
 }
 
-static CLARITY_STD_REF: LazyLock<HashMap<String, String>> = LazyLock::new(build_api_reference);
+static CLARITY_STD_REF: LazyLock<BTreeMap<String, String>> = LazyLock::new(build_api_reference);
 
-static CLARITY_STD_INDEX: LazyLock<Vec<String>> = LazyLock::new(|| {
-    let mut keys = CLARITY_STD_REF
-        .keys()
-        .map(String::from)
-        .collect::<Vec<String>>();
-    keys.sort();
-    keys
-});
+static CLARITY_KEYWORDS_REF: LazyLock<BTreeMap<String, String>> = LazyLock::new(clarity_keywords);
 
-static CLARITY_KEYWORDS_REF: LazyLock<HashMap<String, String>> = LazyLock::new(clarity_keywords);
-
-static CLARITY_KEYWORDS_INDEX: LazyLock<Vec<String>> = LazyLock::new(|| {
-    let mut keys = CLARITY_KEYWORDS_REF
-        .keys()
-        .map(String::from)
-        .collect::<Vec<String>>();
-    keys.sort();
-    keys
-});
-
-pub fn functions_index() -> &'static [String] {
-    &CLARITY_STD_INDEX
+pub fn functions_index() -> impl Iterator<Item = &'static str> {
+    CLARITY_STD_REF.keys().map(String::as_str)
 }
 
-pub fn keywords_index() -> &'static [String] {
-    &CLARITY_KEYWORDS_INDEX
+pub fn keywords_index() -> impl Iterator<Item = &'static str> {
+    CLARITY_KEYWORDS_REF.keys().map(String::as_str)
 }
 
 pub fn describe(name: &str) -> Option<&'static str> {
@@ -94,12 +76,11 @@ mod tests {
     }
 
     #[test]
-    fn indexes_are_sorted_and_complete() {
+    fn indexes_are_sorted_and_describable() {
         assert!(functions_index().is_sorted());
         assert!(keywords_index().is_sorted());
         assert!(functions_index()
-            .iter()
+            .chain(keywords_index())
             .all(|name| describe(name).is_some()));
-        assert!(keywords_index().iter().all(|name| describe(name).is_some()));
     }
 }

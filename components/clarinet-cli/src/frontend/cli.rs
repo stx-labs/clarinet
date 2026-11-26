@@ -1530,27 +1530,31 @@ fn display_docs(names: &[String]) {
     use clarity_repl::repl::docs;
 
     if names.is_empty() {
-        println!("Functions\n{}", docs::functions_index().join("\n"));
-        println!("\nKeywords\n{}", docs::keywords_index().join("\n"));
+        let functions: Vec<_> = docs::functions_index().collect();
+        let keywords: Vec<_> = docs::keywords_index().collect();
+        println!("Functions\n{}", functions.join("\n"));
+        println!("\nKeywords\n{}", keywords.join("\n"));
         return;
     }
 
-    let mut found_all = true;
-    for (i, name) in names.iter().enumerate() {
+    let mut entries = vec![];
+    let mut missing = vec![];
+    for name in names {
         match docs::describe(name) {
-            Some(doc) => {
-                if i > 0 {
-                    println!();
-                }
-                println!("# {name}\n{doc}");
-            }
-            None => {
-                eprintln!("{} no documentation found for '{name}'", red!("error:"));
-                found_all = false;
-            }
+            Some(doc) => entries.push(format!("# {name}\n{doc}")),
+            None => missing.push(name),
         }
     }
-    if !found_all {
+    if !entries.is_empty() {
+        println!("{}", entries.join("\n\n"));
+    }
+    if !missing.is_empty() {
+        for name in missing {
+            eprintln!(
+                "{}",
+                format_err!(format!("no documentation found for '{name}'"))
+            );
+        }
         std::process::exit(1);
     }
 }

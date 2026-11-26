@@ -23,12 +23,14 @@ fn stdout(output: &Output) -> String {
 fn lists_functions_then_keywords() {
     let output = run_docs(&[]);
     assert!(output.status.success());
-    let lines: Vec<String> = stdout(&output).lines().map(String::from).collect();
+    let out = stdout(&output);
+    let lines: Vec<&str> = out.lines().collect();
+    let position = |line| lines.iter().position(|&l| l == line).unwrap();
 
     assert_eq!(lines[0], "Functions");
-    let keywords_heading = lines.iter().position(|l| l == "Keywords").unwrap();
-    let map = lines.iter().position(|l| l == "map").unwrap();
-    let tx_sender = lines.iter().position(|l| l == "tx-sender").unwrap();
+    let keywords_heading = position("Keywords");
+    let map = position("map");
+    let tx_sender = position("tx-sender");
     assert!(map < keywords_heading);
     assert!(keywords_heading < tx_sender);
 }
