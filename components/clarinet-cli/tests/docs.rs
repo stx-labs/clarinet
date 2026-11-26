@@ -43,6 +43,13 @@ fn describes_a_function() {
 }
 
 #[test]
+fn describes_an_operator_by_its_symbol() {
+    let output = run_docs(&["<="]);
+    assert!(output.status.success());
+    assert!(stdout(&output).starts_with("# <=\nUsage\n(<= "));
+}
+
+#[test]
 fn describes_several_names_in_order() {
     let output = run_docs(&["tx-sender", "as-contract?", "with-stx"]);
     assert!(output.status.success());

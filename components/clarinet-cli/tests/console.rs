@@ -411,3 +411,26 @@ fn eval_routes_cost_warnings_and_honors_toggles() {
         "{stdout}"
     );
 }
+
+#[test]
+fn displays_clarity_docs() {
+    let output = run_console_command(
+        &[],
+        &[
+            "::describe tx-sender",
+            "::describe +",
+            "::describe not-a-clarity-name",
+            "::keywords",
+        ],
+    )
+    .join("\n");
+    assert!(
+        output.starts_with("Description\nReturns the original sender of the current transaction"),
+        "{output}"
+    );
+    assert!(output.contains("\nUsage\n(+ i1 i2...)\n"), "{output}");
+    assert!(
+        output.contains("\nIt looks like there aren't matches for your search\nblock-height\n"),
+        "{output}"
+    );
+}

@@ -57,10 +57,20 @@ pub fn keywords_index() -> impl Iterator<Item = &'static str> {
     CLARITY_KEYWORDS_REF.keys().map(String::as_str)
 }
 
+/// Operators are keyed with an alias, like `+ (add)`, so they also match on their symbol alone.
 pub fn describe(name: &str) -> Option<&'static str> {
     CLARITY_STD_REF
         .get(name)
         .or_else(|| CLARITY_KEYWORDS_REF.get(name))
+        .or_else(|| {
+            CLARITY_STD_REF
+                .iter()
+                .find(|(key, _)| {
+                    key.split_once(' ')
+                        .is_some_and(|(symbol, _)| symbol == name)
+                })
+                .map(|(_, doc)| doc)
+        })
         .map(String::as_str)
 }
 
@@ -73,6 +83,13 @@ mod tests {
         assert!(describe("map").unwrap().starts_with("Usage\n(map "));
         assert!(describe("tx-sender").unwrap().starts_with("Description\n"));
         assert_eq!(describe("not-a-clarity-name"), None);
+    }
+
+    #[test]
+    fn describe_finds_operators_by_symbol() {
+        assert_eq!(describe("+"), describe("+ (add)"));
+        assert!(describe("<").unwrap().starts_with("Usage\n(< "));
+        assert!(describe("<=").unwrap().starts_with("Usage\n(<= "));
     }
 
     #[test]
