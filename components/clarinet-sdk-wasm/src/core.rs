@@ -17,6 +17,7 @@ use clarity::types::Address;
 use clarity::vm::analysis::contract_interface_builder::{
     ContractInterface, ContractInterfaceFunction, ContractInterfaceFunctionAccess,
 };
+use clarity::vm::diagnostic::Level;
 use clarity::vm::types::{PrincipalData, QualifiedContractIdentifier, StandardPrincipalData};
 use clarity::vm::{ClarityVersion, EvaluationResult, ExecutionResult, Value};
 use clarity_repl::repl::boot::{
@@ -681,8 +682,12 @@ impl SDK {
                         contract_id.clone(),
                         diagnostics.iter().map(|d| d.diagnostic.clone()).collect(),
                     )]);
-                    let diags_digest =
-                        DiagnosticsDigest::new(&contract_diagnostics, &HashMap::new(), &deployment);
+                    let diags_digest = DiagnosticsDigest::new(
+                        &contract_diagnostics,
+                        &HashMap::new(),
+                        &deployment,
+                        &Level::Note,
+                    );
                     if diags_digest.errors > 0 {
                         return Err(diags_digest.message);
                     }
@@ -753,8 +758,12 @@ impl SDK {
         .await?;
 
         if !artifacts.success {
-            let diags_digest =
-                DiagnosticsDigest::new(&artifacts.diags, &artifacts.lint_diags, &deployment);
+            let diags_digest = DiagnosticsDigest::new(
+                &artifacts.diags,
+                &artifacts.lint_diags,
+                &deployment,
+                &Level::Note,
+            );
             if diags_digest.errors > 0 {
                 return Err(diags_digest.message);
             }
