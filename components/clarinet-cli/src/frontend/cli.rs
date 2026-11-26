@@ -1547,9 +1547,11 @@ fn display_docs(
         let versions = clarity_version.unwrap_or_default();
         let functions: Vec<_> = docs::functions_index(versions).collect();
         let keywords: Vec<_> = docs::keywords_index(versions).collect();
-        println!("Functions and keywords in {versions} (`--clarity-version <version|all>` to list another version)");
-        println!("\n## Functions\n{}", functions.join("\n"));
-        println!("\n## Keywords\n{}", keywords.join("\n"));
+        print_stdout(&format!(
+            "Functions and keywords in {versions} (`--clarity-version <version|all>` to list another version)\n\n## Functions\n{}\n\n## Keywords\n{}",
+            functions.join("\n"),
+            keywords.join("\n")
+        ));
         return;
     }
 
@@ -1562,7 +1564,7 @@ fn display_docs(
         }
     }
     if !entries.is_empty() {
-        println!("{}", entries.join("\n\n"));
+        print_stdout(&entries.join("\n\n"));
     }
     if !missing.is_empty() {
         for name in missing {
@@ -1572,6 +1574,20 @@ fn display_docs(
             );
         }
         std::process::exit(1);
+    }
+}
+
+/// Unlike `println!`, doesn't panic when the reader closes the pipe (`clarinet docs | head`).
+fn print_stdout(text: &str) {
+    use std::io::Write;
+    if let Err(err) = writeln!(std::io::stdout().lock(), "{text}") {
+        if err.kind() != std::io::ErrorKind::BrokenPipe {
+            eprintln!(
+                "{}",
+                format_err!(format!("failed to write to stdout: {err}"))
+            );
+            std::process::exit(1);
+        }
     }
 }
 

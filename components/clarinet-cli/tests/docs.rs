@@ -1,5 +1,5 @@
 use std::path::Path;
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 
@@ -132,4 +132,30 @@ fn ignores_an_invalid_project() {
     let output = run_docs_in(temp_dir.path(), &["map"]);
     assert!(output.status.success());
     assert!(stdout(&output).starts_with("# map\n"));
+}
+
+#[test]
+fn stops_quietly_when_the_reader_closes_the_pipe() {
+    let names: Vec<String> = lines(&run_docs(&["-c", "all"]))
+        .into_iter()
+        .skip(1)
+        .filter(|line| !line.is_empty() && !line.starts_with("## "))
+        .collect();
+    let temp_dir = tempfile::tempdir().unwrap();
+    let mut child = Command::new(env!("CARGO_BIN_EXE_clarinet"))
+        .args(["docs", "--"])
+        .args(&names)
+        .current_dir(temp_dir.path())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    drop(child.stdout.take());
+    let output = child.wait_with_output().unwrap();
+    assert_eq!(output.status.code(), Some(0));
+    assert!(
+        output.stderr.is_empty(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

@@ -457,6 +457,8 @@ fn lists_clarity_functions_and_keywords_by_version() {
             "::keywords 1",
             "::keywords all",
             "::keywords 0",
+            "::functions::functions 2",
+            "::keywordsall",
         ],
     );
     let headings: Vec<_> = output
@@ -480,6 +482,11 @@ fn lists_clarity_functions_and_keywords_by_version() {
     assert_eq!(output.matches("\nblock-height\n").count(), 2, "{output}");
     assert!(
         output.contains("\ninvalid Clarity version '0', expected one of 1, 2"),
+        "{output}"
+    );
+    assert_eq!(
+        output.matches("Invalid command. Try `::help`").count(),
+        2,
         "{output}"
     );
 }

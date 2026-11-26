@@ -421,14 +421,14 @@ impl Session {
             "::help" => Ok(self.display_help()),
 
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::functions") => display_index(
+            cmd if cmd.split_whitespace().next() == Some("::functions") => display_index(
                 cmd,
                 "::functions",
                 "Native functions",
                 docs::functions_index,
             ),
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::keywords") => {
+            cmd if cmd.split_whitespace().next() == Some("::keywords") => {
                 display_index(cmd, "::keywords", "Keywords", docs::keywords_index)
             }
             #[cfg(not(target_arch = "wasm32"))]
@@ -1924,7 +1924,7 @@ fn display_index<I: Iterator<Item = &'static str>>(
     title: &str,
     index: fn(docs::ClarityVersions) -> I,
 ) -> Result<String, String> {
-    let versions = match command.trim_start_matches(prefix).trim() {
+    let versions = match command.strip_prefix(prefix).unwrap_or_default().trim() {
         "" => docs::ClarityVersions::default(),
         args => args.parse().map_err(|err: String| err.red().to_string())?,
     };

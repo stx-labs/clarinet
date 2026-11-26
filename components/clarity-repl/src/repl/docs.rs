@@ -5,7 +5,7 @@ use std::sync::LazyLock;
 
 use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 use clarity::vm::docs::{
-    make_api_reference, make_define_reference, make_keyword_reference, FunctionAPI,
+    make_api_reference, make_define_reference, make_keyword_reference, DocNotice, FunctionAPI,
 };
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
@@ -82,6 +82,7 @@ impl Entry {
     fn new(
         usage: Option<&str>,
         description: &str,
+        notices: &[DocNotice],
         example: &str,
         min_version: ClarityVersion,
         max_version: Option<ClarityVersion>,
@@ -94,6 +95,7 @@ impl Entry {
             usage.map(|usage| ("Usage", clarity_block(usage))),
             Some(("Clarity version", availability)),
             Some(("Description", unwrap_lines(description))),
+            (!notices.is_empty()).then(|| ("Notices", format_notices(notices))),
             Some(("Examples", clarity_block(example))),
         ];
         let doc = sections
@@ -149,6 +151,21 @@ fn unwrap_block(lines: &[&str]) -> String {
     out
 }
 
+fn format_notices(notices: &[DocNotice]) -> String {
+    notices
+        .iter()
+        .map(|notice| {
+            let mut level = notice.level.chars();
+            let level: String = level
+                .next()
+                .map(|first| first.to_uppercase().chain(level).collect())
+                .unwrap_or_default();
+            format!("- **{level}:** {}", unwrap_lines(notice.body))
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn clarity_block(code: &str) -> String {
     format!("```clarity\n{}\n```", code.trim())
 }
@@ -157,6 +174,7 @@ fn function_entry(api: FunctionAPI) -> (String, Entry) {
     let entry = Entry::new(
         Some(&api.signature),
         &api.description,
+        &api.notices,
         &api.example,
         api.min_version,
         api.max_version,
@@ -184,6 +202,7 @@ fn clarity_keywords() -> BTreeMap<String, Entry> {
             let entry = Entry::new(
                 None,
                 key.description,
+                &key.notices,
                 key.example,
                 key.min_version,
                 key.max_version,
@@ -278,13 +297,30 @@ mod tests {
         assert!(lookup("tx-sender")
             .unwrap()
             .ends_with(";; Will print out a Stacks address of the transaction sender\n```"));
-        assert!(functions_index(ClarityVersions::All)
-            .chain(keywords_index(ClarityVersions::All))
-            .all(|name| lookup(name)
-                .unwrap()
-                .matches("```")
-                .count()
-                .is_multiple_of(2)));
+        for name in functions_index(ClarityVersions::All) {
+            let doc = lookup(name).unwrap();
+            assert!(doc.starts_with("## Usage\n```clarity\n"), "{doc}");
+            assert!(doc.contains("\n```\n\n## Clarity version\n"), "{doc}");
+        }
+        for name in
+            functions_index(ClarityVersions::All).chain(keywords_index(ClarityVersions::All))
+        {
+            let doc = lookup(name).unwrap();
+            let (_, examples) = doc.split_once("\n\n## Examples\n").unwrap();
+            assert!(examples.starts_with("```clarity\n"), "{doc}");
+            assert!(examples.ends_with("\n```"), "{doc}");
+            assert_eq!(examples.matches("```").count(), 2, "{doc}");
+        }
+    }
+
+    #[test]
+    fn lookup_shows_notices() {
+        let doc = lookup("at-block").unwrap();
+        assert!(
+            doc.contains("\n\n## Notices\n- **Danger:** As of Epoch 3.4, existing contracts using `at-block` will throw an error if called.\n\n## Examples\n"),
+            "{doc}"
+        );
+        assert!(!lookup("map").unwrap().contains("## Notices"));
     }
 
     #[test]
@@ -341,6 +377,12 @@ mod tests {
         assert!(!keywords(ClarityVersions::default()).contains(&"block-height"));
         assert!(keywords(ClarityVersions::default()).contains(&"stacks-block-height"));
         assert!(keywords(ClarityVersions::All).contains(&"block-height"));
+
+        let clarity = |version| ClarityVersions::Only(version);
+        assert!(keywords(clarity(ClarityVersion::Clarity2)).contains(&"block-height"));
+        assert!(!keywords(clarity(ClarityVersion::Clarity3)).contains(&"block-height"));
+        assert!(functions(clarity(ClarityVersion::Clarity3)).contains(&"as-contract"));
+        assert!(!functions(clarity(ClarityVersion::Clarity4)).contains(&"as-contract"));
 
         assert!(functions(clarity1).contains(&"define-public"));
         assert!(!functions(clarity1).contains(&"as-contract?"));
