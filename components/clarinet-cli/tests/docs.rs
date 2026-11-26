@@ -88,6 +88,13 @@ fn describes_an_operator_by_its_symbol() {
 }
 
 #[test]
+fn describes_an_operator_as_listed() {
+    let output = run_docs(&["- (subtract)"]);
+    assert!(output.status.success());
+    assert!(stdout(&output).starts_with("# - (subtract)\n## Usage\n"));
+}
+
+#[test]
 fn describes_several_names_in_order() {
     let output = run_docs(&["tx-sender", "as-contract?", "with-stx"]);
     assert!(output.status.success());

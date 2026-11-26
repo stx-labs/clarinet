@@ -505,7 +505,7 @@ struct ApplyDeployment {
 )]
 struct Docs {
     /// Functions or keywords to describe; lists them all when omitted
-    #[clap(value_name = "NAME")]
+    #[clap(value_name = "NAME", allow_hyphen_values = true)]
     pub names: Vec<String>,
     /// Clarity version to list: a number (`3`), a name (`clarity3`) or `all` [default: the version new contracts use]
     #[clap(
@@ -1557,7 +1557,7 @@ fn display_docs(
     let mut missing = vec![];
     for name in &names {
         match docs::describe(name) {
-            Some(doc) => entries.push(format!("# {name}\n{doc}")),
+            Some(doc) => entries.push(doc),
             None => missing.push(name),
         }
     }

@@ -428,7 +428,7 @@ fn displays_clarity_docs() {
     )
     .join("\n");
     assert!(
-        output.starts_with("## Clarity version\nAvailable since Clarity 1\n\n## Description\nReturns the original sender of the current transaction"),
+        output.starts_with("# tx-sender\n## Clarity version\nAvailable since Clarity 1\n\n## Description\nReturns the original sender of the current transaction"),
         "{output}"
     );
     assert!(
@@ -442,7 +442,7 @@ fn displays_clarity_docs() {
         "{output}"
     );
     assert!(
-        output.contains("\nIt looks like there aren't matches for your search\n## Clarity version\nAvailable since Clarity 1 through Clarity 2\n"),
+        output.contains("\nIt looks like there aren't matches for your search\n# block-height\n## Clarity version\nAvailable since Clarity 1 through Clarity 2\n"),
         "{output}"
     );
 }

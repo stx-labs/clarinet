@@ -93,7 +93,7 @@ impl Entry {
         let sections = [
             usage.map(|usage| ("Usage", clarity_block(usage))),
             Some(("Clarity version", availability)),
-            Some(("Description", description.replace('\n', " "))),
+            Some(("Description", unwrap_lines(description))),
             Some(("Examples", clarity_block(example))),
         ];
         let doc = sections
@@ -108,6 +108,25 @@ impl Entry {
             max_version,
         }
     }
+}
+
+/// Joins stacks-core's hard-wrapped lines, keeping paragraphs and list items.
+fn unwrap_lines(text: &str) -> String {
+    let mut out = String::new();
+    for line in text.lines().map(str::trim) {
+        if line.is_empty() {
+            if !out.is_empty() && !out.ends_with("\n\n") {
+                out.push_str("\n\n");
+            }
+            continue;
+        }
+        if !out.is_empty() && !out.ends_with('\n') {
+            let is_list_item = line.starts_with("* ") || line.starts_with("- ");
+            out.push(if is_list_item { '\n' } else { ' ' });
+        }
+        out.push_str(line);
+    }
+    out.trim_end().to_string()
 }
 
 fn clarity_block(code: &str) -> String {
@@ -176,8 +195,13 @@ pub fn keywords_index(versions: ClarityVersions) -> impl Iterator<Item = &'stati
     index(&CLARITY_KEYWORDS_REF, versions)
 }
 
+/// The entry for `name` under a `# name` heading.
+pub fn describe(name: &str) -> Option<String> {
+    lookup(name).map(|doc| format!("# {name}\n{doc}"))
+}
+
 /// Operators are keyed with an alias, like `+ (add)`, so they also match on their symbol alone.
-pub fn describe(name: &str) -> Option<&'static str> {
+fn lookup(name: &str) -> Option<&'static str> {
     CLARITY_STD_REF
         .get(name)
         .or_else(|| CLARITY_KEYWORDS_REF.get(name))
@@ -198,45 +222,45 @@ mod tests {
     use super::*;
 
     #[test]
-    fn describe_finds_functions_and_keywords() {
-        assert!(describe("map")
+    fn lookup_finds_functions_and_keywords() {
+        assert!(lookup("map")
             .unwrap()
             .starts_with("## Usage\n```clarity\n(map "));
-        assert!(describe("tx-sender")
+        assert!(lookup("tx-sender")
             .unwrap()
             .starts_with("## Clarity version\nAvailable since Clarity 1\n\n## Description\n"));
-        assert_eq!(describe("not-a-clarity-name"), None);
+        assert_eq!(lookup("not-a-clarity-name"), None);
     }
 
     #[test]
-    fn describe_finds_operators_by_symbol() {
-        assert_eq!(describe("+"), describe("+ (add)"));
-        assert!(describe("<")
+    fn lookup_finds_operators_by_symbol() {
+        assert_eq!(lookup("+"), lookup("+ (add)"));
+        assert!(lookup("<")
             .unwrap()
             .starts_with("## Usage\n```clarity\n(< "));
-        assert!(describe("<=")
+        assert!(lookup("<=")
             .unwrap()
             .starts_with("## Usage\n```clarity\n(<= "));
     }
 
     #[test]
-    fn describe_shows_availability() {
-        assert!(describe("block-height")
+    fn lookup_shows_availability() {
+        assert!(lookup("block-height")
             .unwrap()
             .starts_with("## Clarity version\nAvailable since Clarity 1 through Clarity 2\n"));
-        assert!(describe("as-contract?")
+        assert!(lookup("as-contract?")
             .unwrap()
             .contains("\n\n## Clarity version\nAvailable since Clarity 4\n\n## Description\n"));
     }
 
     #[test]
-    fn describe_fences_code() {
-        assert!(describe("tx-sender")
+    fn lookup_fences_code() {
+        assert!(lookup("tx-sender")
             .unwrap()
             .ends_with(";; Will print out a Stacks address of the transaction sender\n```"));
         assert!(functions_index(ClarityVersions::All)
             .chain(keywords_index(ClarityVersions::All))
-            .all(|name| describe(name)
+            .all(|name| lookup(name)
                 .unwrap()
                 .matches("```")
                 .count()
@@ -244,9 +268,28 @@ mod tests {
     }
 
     #[test]
-    fn describe_ignores_versions() {
-        assert!(describe("block-height").is_some());
-        assert!(describe("stacks-block-height").is_some());
+    fn describe_adds_a_heading() {
+        assert!(describe("<=").unwrap().starts_with("# <=\n## Usage\n"));
+        assert_eq!(describe("not-a-clarity-name"), None);
+    }
+
+    #[test]
+    fn lookup_keeps_paragraphs_and_lists() {
+        let doc = lookup("stx-transfer?").unwrap();
+        assert!(
+            doc.contains("`tx-sender`.\n\nThis function returns"),
+            "{doc}"
+        );
+        assert!(doc.contains(":\n\n* `(err u1)` -- "), "{doc}");
+        assert!(doc.contains("to transfer\n* `(err u2)` -- "), "{doc}");
+        let doc = lookup("secp256k1-decompress?").unwrap();
+        assert!(doc.contains(" error code:\n- `(err u1)` "), "{doc}");
+    }
+
+    #[test]
+    fn lookup_ignores_versions() {
+        assert!(lookup("block-height").is_some());
+        assert!(lookup("stacks-block-height").is_some());
     }
 
     #[test]
@@ -255,7 +298,7 @@ mod tests {
         assert!(keywords_index(ClarityVersions::All).is_sorted());
         assert!(functions_index(ClarityVersions::All)
             .chain(keywords_index(ClarityVersions::All))
-            .all(|name| describe(name).is_some()));
+            .all(|name| lookup(name).is_some()));
     }
 
     #[test]

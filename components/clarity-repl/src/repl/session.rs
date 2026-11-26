@@ -1895,7 +1895,7 @@ impl Session {
     fn display_doc(&self, command: &str) -> Result<String, String> {
         let keyword = command.trim_start_matches("::describe").trim();
         match docs::describe(keyword) {
-            Some(doc) => Ok(doc.yellow().to_string()),
+            Some(doc) => Ok(doc.as_str().yellow().to_string()),
             None => Err("It looks like there aren't matches for your search"
                 .red()
                 .to_string()),
