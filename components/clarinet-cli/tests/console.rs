@@ -1,6 +1,8 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+use clarinet_defaults::DEFAULT_CLARITY_VERSION;
+
 fn mock_remote_node(network_id: u32, height: u32) -> mockito::ServerGuard {
     let mut server = mockito::Server::new();
 
@@ -421,8 +423,7 @@ fn displays_clarity_docs() {
             "::describe +",
             "::describe <= (less than or equal)",
             "::describe not-a-clarity-name",
-            "::keywords",
-            "::functions",
+            "::describe block-height",
         ],
     )
     .join("\n");
@@ -433,11 +434,44 @@ fn displays_clarity_docs() {
     assert!(output.contains("\nUsage\n(+ i1 i2...)\n"), "{output}");
     assert!(output.contains("\nUsage\n(<= i1 i2)\n"), "{output}");
     assert!(
-        output.contains("\nIt looks like there aren't matches for your search\nblock-height\n"),
+        output.contains("\nIt looks like there aren't matches for your search\nDescription\n"),
         "{output}"
     );
+}
+
+#[test]
+fn lists_clarity_functions_and_keywords_by_version() {
+    let output = run_console_command(
+        &[],
+        &[
+            "::keywords",
+            "::functions",
+            "::keywords 1",
+            "::keywords all",
+            "::keywords 0",
+        ],
+    );
+    let headings: Vec<_> = output
+        .iter()
+        .filter(|line| line.starts_with("Keywords in ") || line.starts_with("Native functions in "))
+        .collect();
+    assert_eq!(
+        headings,
+        [
+            &format!("Keywords in {DEFAULT_CLARITY_VERSION} (`::keywords <version|all>` to list another version)"),
+            &format!("Native functions in {DEFAULT_CLARITY_VERSION} (`::functions <version|all>` to list another version)"),
+            "Keywords in Clarity 1 (`::keywords <version|all>` to list another version)",
+            "Keywords in all Clarity versions (`::keywords <version|all>` to list another version)",
+        ]
+    );
+    let output = output.join("\n");
     assert!(
-        output.contains("\ntx-sponsor?\n* (multiply)\n+ (add)\n- (subtract)\n"),
+        output.contains("\n* (multiply)\n+ (add)\n- (subtract)\n"),
+        "{output}"
+    );
+    assert_eq!(output.matches("\nblock-height\n").count(), 2, "{output}");
+    assert!(
+        output.contains("\ninvalid Clarity version '0', expected one of 1, 2"),
         "{output}"
     );
 }

@@ -1,60 +1,155 @@
 use std::collections::BTreeMap;
+use std::fmt;
+use std::str::FromStr;
 use std::sync::LazyLock;
 
+use clarinet_defaults::DEFAULT_CLARITY_VERSION;
 use clarity::vm::docs::{
     make_api_reference, make_define_reference, make_keyword_reference, FunctionAPI,
 };
 use clarity::vm::functions::define::DefineFunctions;
 use clarity::vm::functions::NativeFunctions;
 use clarity::vm::variables::NativeVariables;
+use clarity::vm::ClarityVersion;
+
+use super::{clarity_version_from_u8, clarity_version_to_u8};
+
+/// The Clarity versions an index lists.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum ClarityVersions {
+    Only(ClarityVersion),
+    All,
+}
+
+impl Default for ClarityVersions {
+    fn default() -> Self {
+        Self::Only(DEFAULT_CLARITY_VERSION)
+    }
+}
+
+impl FromStr for ClarityVersions {
+    type Err = String;
+
+    /// Accepts a version number (`6`), a version name (`clarity6`) or `all`.
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        if s.eq_ignore_ascii_case("all") {
+            return Ok(Self::All);
+        }
+        s.parse()
+            .ok()
+            .and_then(clarity_version_from_u8)
+            .or_else(|| s.parse().ok())
+            .map(Self::Only)
+            .ok_or_else(|| {
+                let versions: Vec<_> = ClarityVersion::ALL
+                    .iter()
+                    .map(|&version| clarity_version_to_u8(version).to_string())
+                    .collect();
+                format!(
+                    "invalid Clarity version '{s}', expected one of {} or 'all'",
+                    versions.join(", ")
+                )
+            })
+    }
+}
+
+impl fmt::Display for ClarityVersions {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Only(version) => write!(f, "{version}"),
+            Self::All => write!(f, "all Clarity versions"),
+        }
+    }
+}
+
+enum Item {
+    Function(NativeFunctions),
+    Define,
+    Keyword(NativeVariables),
+}
+
+impl Item {
+    fn is_in(&self, versions: ClarityVersions) -> bool {
+        let ClarityVersions::Only(version) = versions else {
+            return true;
+        };
+        match self {
+            Self::Function(function) => {
+                NativeFunctions::lookup_by_name_at_version(function.get_name_str(), &version)
+                    .is_some()
+            }
+            Self::Define => true,
+            Self::Keyword(keyword) => {
+                NativeVariables::lookup_by_name_at_version(keyword.get_name_str(), &version)
+                    .is_some()
+            }
+        }
+    }
+}
+
+struct Entry {
+    doc: String,
+    item: Item,
+}
 
 fn normalize_description(description: &str) -> String {
     description.replace('\n', " ")
 }
 
-fn format_api_doc(function_api: &FunctionAPI) -> (String, String) {
+fn format_api_doc(function_api: &FunctionAPI, item: Item) -> (String, Entry) {
     let description = normalize_description(&function_api.description);
     let doc = format!(
         "Usage\n{}\n\nDescription\n{}\n\nExamples\n{}",
         function_api.signature, description, function_api.example
     );
-    (function_api.name.clone(), doc)
+    (function_api.name.clone(), Entry { doc, item })
 }
 
-fn build_api_reference() -> BTreeMap<String, String> {
+fn build_api_reference() -> BTreeMap<String, Entry> {
     NativeFunctions::ALL
         .iter()
-        .map(|func| format_api_doc(&make_api_reference(func)))
+        .map(|func| format_api_doc(&make_api_reference(func), Item::Function(*func)))
         .chain(
             DefineFunctions::ALL
                 .iter()
-                .map(|func| format_api_doc(&make_define_reference(func))),
+                .map(|func| format_api_doc(&make_define_reference(func), Item::Define)),
         )
         .collect()
 }
 
-fn clarity_keywords() -> BTreeMap<String, String> {
+fn clarity_keywords() -> BTreeMap<String, Entry> {
     NativeVariables::ALL
         .iter()
-        .filter_map(make_keyword_reference)
-        .map(|key| {
+        .filter_map(|variable| Some((*variable, make_keyword_reference(variable)?)))
+        .map(|(variable, key)| {
             let description = normalize_description(key.description);
             let doc = format!("Description\n{}\n\nExamples\n{}", description, key.example);
-            (key.name.to_string(), doc)
+            let item = Item::Keyword(variable);
+            (key.name.to_string(), Entry { doc, item })
         })
         .collect()
 }
 
-static CLARITY_STD_REF: LazyLock<BTreeMap<String, String>> = LazyLock::new(build_api_reference);
+static CLARITY_STD_REF: LazyLock<BTreeMap<String, Entry>> = LazyLock::new(build_api_reference);
 
-static CLARITY_KEYWORDS_REF: LazyLock<BTreeMap<String, String>> = LazyLock::new(clarity_keywords);
+static CLARITY_KEYWORDS_REF: LazyLock<BTreeMap<String, Entry>> = LazyLock::new(clarity_keywords);
 
-pub fn functions_index() -> impl Iterator<Item = &'static str> {
-    CLARITY_STD_REF.keys().map(String::as_str)
+fn index(
+    reference: &'static BTreeMap<String, Entry>,
+    versions: ClarityVersions,
+) -> impl Iterator<Item = &'static str> {
+    reference
+        .iter()
+        .filter(move |(_, entry)| entry.item.is_in(versions))
+        .map(|(name, _)| name.as_str())
 }
 
-pub fn keywords_index() -> impl Iterator<Item = &'static str> {
-    CLARITY_KEYWORDS_REF.keys().map(String::as_str)
+pub fn functions_index(versions: ClarityVersions) -> impl Iterator<Item = &'static str> {
+    index(&CLARITY_STD_REF, versions)
+}
+
+pub fn keywords_index(versions: ClarityVersions) -> impl Iterator<Item = &'static str> {
+    index(&CLARITY_KEYWORDS_REF, versions)
 }
 
 /// Operators are keyed with an alias, like `+ (add)`, so they also match on their symbol alone.
@@ -69,9 +164,9 @@ pub fn describe(name: &str) -> Option<&'static str> {
                     key.split_once(' ')
                         .is_some_and(|(symbol, _)| symbol == name)
                 })
-                .map(|(_, doc)| doc)
+                .map(|(_, entry)| entry)
         })
-        .map(String::as_str)
+        .map(|entry| entry.doc.as_str())
 }
 
 #[cfg(test)]
@@ -93,11 +188,50 @@ mod tests {
     }
 
     #[test]
+    fn describe_ignores_versions() {
+        assert!(describe("block-height").is_some());
+        assert!(describe("stacks-block-height").is_some());
+    }
+
+    #[test]
     fn indexes_are_sorted_and_describable() {
-        assert!(functions_index().is_sorted());
-        assert!(keywords_index().is_sorted());
-        assert!(functions_index()
-            .chain(keywords_index())
+        assert!(functions_index(ClarityVersions::All).is_sorted());
+        assert!(keywords_index(ClarityVersions::All).is_sorted());
+        assert!(functions_index(ClarityVersions::All)
+            .chain(keywords_index(ClarityVersions::All))
             .all(|name| describe(name).is_some()));
+    }
+
+    #[test]
+    fn indexes_filter_by_version() {
+        let keywords = |versions| keywords_index(versions).collect::<Vec<_>>();
+        let functions = |versions| functions_index(versions).collect::<Vec<_>>();
+        let clarity1 = ClarityVersions::Only(ClarityVersion::Clarity1);
+
+        assert!(keywords(clarity1).contains(&"block-height"));
+        assert!(!keywords(clarity1).contains(&"stacks-block-height"));
+        assert!(!keywords(ClarityVersions::default()).contains(&"block-height"));
+        assert!(keywords(ClarityVersions::default()).contains(&"stacks-block-height"));
+        assert!(keywords(ClarityVersions::All).contains(&"block-height"));
+
+        assert!(functions(clarity1).contains(&"define-public"));
+        assert!(!functions(clarity1).contains(&"as-contract?"));
+        assert!(functions(ClarityVersions::default()).contains(&"as-contract?"));
+    }
+
+    #[test]
+    fn parses_versions() {
+        let parse = |s: &str| s.parse::<ClarityVersions>();
+        assert_eq!(parse("all"), Ok(ClarityVersions::All));
+        assert_eq!(
+            parse("3"),
+            Ok(ClarityVersions::Only(ClarityVersion::Clarity3))
+        );
+        assert_eq!(
+            parse("clarity2"),
+            Ok(ClarityVersions::Only(ClarityVersion::Clarity2))
+        );
+        assert!(parse("0").unwrap_err().contains("expected one of 1, 2"));
+        assert!(parse("latest").is_err());
     }
 }

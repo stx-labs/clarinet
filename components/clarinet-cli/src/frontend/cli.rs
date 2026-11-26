@@ -37,6 +37,7 @@ use clarity_repl::analysis::linter::{LintGroup, LintName};
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
+use clarity_repl::repl::docs::{self, ClarityVersions};
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{
     clarity_version_to_u8, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
@@ -499,11 +500,20 @@ struct ApplyDeployment {
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
-#[clap(after_help = "Examples:\n  clarinet docs\n  clarinet docs 'as-contract?' with-stx")]
+#[clap(
+    after_help = "Examples:\n  clarinet docs\n  clarinet docs --clarity-version all\n  clarinet docs 'as-contract?' with-stx"
+)]
 struct Docs {
-    /// Functions or keywords to describe; lists all of them when omitted
+    /// Functions or keywords to describe; lists them all when omitted
     #[clap(value_name = "NAME")]
     pub names: Vec<String>,
+    /// Clarity version to list, as a number or `all` [default: the version new contracts use]
+    #[clap(
+        long = "clarity-version",
+        value_name = "VERSION",
+        conflicts_with = "names"
+    )]
+    pub clarity_version: Option<ClarityVersions>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1071,7 +1081,7 @@ pub fn main() {
                 }
             }
         },
-        Command::Docs(cmd) => display_docs(&cmd.names),
+        Command::Docs(cmd) => display_docs(cmd),
         Command::Console(cmd) => {
             let interactive = cmd.eval.is_empty();
             let mut expressions = cmd.eval.iter();
@@ -1526,20 +1536,25 @@ pub fn main() {
     update_check::print_update_message(update_handle);
 }
 
-fn display_docs(names: &[String]) {
-    use clarity_repl::repl::docs;
-
+fn display_docs(
+    Docs {
+        names,
+        clarity_version,
+    }: Docs,
+) {
     if names.is_empty() {
-        let functions: Vec<_> = docs::functions_index().collect();
-        let keywords: Vec<_> = docs::keywords_index().collect();
-        println!("Functions\n{}", functions.join("\n"));
+        let versions = clarity_version.unwrap_or_default();
+        let functions: Vec<_> = docs::functions_index(versions).collect();
+        let keywords: Vec<_> = docs::keywords_index(versions).collect();
+        println!("Functions and keywords in {versions} (`--clarity-version <version|all>` to list another version)");
+        println!("\nFunctions\n{}", functions.join("\n"));
         println!("\nKeywords\n{}", keywords.join("\n"));
         return;
     }
 
     let mut entries = vec![];
     let mut missing = vec![];
-    for name in names {
+    for name in &names {
         match docs::describe(name) {
             Some(doc) => entries.push(format!("# {name}\n{doc}")),
             None => missing.push(name),
