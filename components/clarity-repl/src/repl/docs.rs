@@ -88,12 +88,17 @@ fn availability(min_version: ClarityVersion, max_version: Option<ClarityVersion>
     }
 }
 
+fn clarity_block(code: &str) -> String {
+    format!("```clarity\n{}\n```", code.trim())
+}
+
 fn format_api_doc(function_api: FunctionAPI) -> (String, Entry) {
     let description = normalize_description(&function_api.description);
     let availability = availability(function_api.min_version, function_api.max_version);
     let doc = format!(
-        "Usage\n{}\n\nClarity version\n{availability}\n\nDescription\n{description}\n\nExamples\n{}",
-        function_api.signature, function_api.example
+        "## Usage\n{}\n\n## Clarity version\n{availability}\n\n## Description\n{description}\n\n## Examples\n{}",
+        clarity_block(&function_api.signature),
+        clarity_block(&function_api.example)
     );
     let entry = Entry {
         doc,
@@ -123,8 +128,8 @@ fn clarity_keywords() -> BTreeMap<String, Entry> {
             let description = normalize_description(key.description);
             let availability = availability(key.min_version, key.max_version);
             let doc = format!(
-                "Clarity version\n{availability}\n\nDescription\n{description}\n\nExamples\n{}",
-                key.example
+                "## Clarity version\n{availability}\n\n## Description\n{description}\n\n## Examples\n{}",
+                clarity_block(key.example)
             );
             let entry = Entry {
                 doc,
@@ -181,28 +186,48 @@ mod tests {
 
     #[test]
     fn describe_finds_functions_and_keywords() {
-        assert!(describe("map").unwrap().starts_with("Usage\n(map "));
+        assert!(describe("map")
+            .unwrap()
+            .starts_with("## Usage\n```clarity\n(map "));
         assert!(describe("tx-sender")
             .unwrap()
-            .starts_with("Clarity version\nAvailable since Clarity 1\n\nDescription\n"));
+            .starts_with("## Clarity version\nAvailable since Clarity 1\n\n## Description\n"));
         assert_eq!(describe("not-a-clarity-name"), None);
     }
 
     #[test]
     fn describe_finds_operators_by_symbol() {
         assert_eq!(describe("+"), describe("+ (add)"));
-        assert!(describe("<").unwrap().starts_with("Usage\n(< "));
-        assert!(describe("<=").unwrap().starts_with("Usage\n(<= "));
+        assert!(describe("<")
+            .unwrap()
+            .starts_with("## Usage\n```clarity\n(< "));
+        assert!(describe("<=")
+            .unwrap()
+            .starts_with("## Usage\n```clarity\n(<= "));
     }
 
     #[test]
     fn describe_shows_availability() {
         assert!(describe("block-height")
             .unwrap()
-            .starts_with("Clarity version\nAvailable since Clarity 1 through Clarity 2\n"));
+            .starts_with("## Clarity version\nAvailable since Clarity 1 through Clarity 2\n"));
         assert!(describe("as-contract?")
             .unwrap()
-            .contains("\n\nClarity version\nAvailable since Clarity 4\n\nDescription\n"));
+            .contains("\n\n## Clarity version\nAvailable since Clarity 4\n\n## Description\n"));
+    }
+
+    #[test]
+    fn describe_fences_code() {
+        assert!(describe("tx-sender")
+            .unwrap()
+            .ends_with(";; Will print out a Stacks address of the transaction sender\n```"));
+        assert!(functions_index(ClarityVersions::All)
+            .chain(keywords_index(ClarityVersions::All))
+            .all(|name| describe(name)
+                .unwrap()
+                .matches("```")
+                .count()
+                .is_multiple_of(2)));
     }
 
     #[test]

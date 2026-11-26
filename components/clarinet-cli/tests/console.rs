@@ -428,16 +428,21 @@ fn displays_clarity_docs() {
     )
     .join("\n");
     assert!(
-        output.starts_with("Clarity version\nAvailable since Clarity 1\n\nDescription\nReturns the original sender of the current transaction"),
+        output.starts_with("## Clarity version\nAvailable since Clarity 1\n\n## Description\nReturns the original sender of the current transaction"),
         "{output}"
     );
     assert!(
-        output.contains("\nUsage\n(+ i1 i2...)\n\nClarity version\nAvailable since Clarity 1\n"),
+        output.contains(
+            "\n## Usage\n```clarity\n(+ i1 i2...)\n```\n\n## Clarity version\nAvailable since Clarity 1\n"
+        ),
         "{output}"
     );
-    assert!(output.contains("\nUsage\n(<= i1 i2)\n"), "{output}");
     assert!(
-        output.contains("\nIt looks like there aren't matches for your search\nClarity version\nAvailable since Clarity 1 through Clarity 2\n"),
+        output.contains("\n## Usage\n```clarity\n(<= i1 i2)\n```\n"),
+        "{output}"
+    );
+    assert!(
+        output.contains("\nIt looks like there aren't matches for your search\n## Clarity version\nAvailable since Clarity 1 through Clarity 2\n"),
         "{output}"
     );
 }

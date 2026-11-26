@@ -1548,8 +1548,8 @@ fn display_docs(
         let functions: Vec<_> = docs::functions_index(versions).collect();
         let keywords: Vec<_> = docs::keywords_index(versions).collect();
         println!("Functions and keywords in {versions} (`--clarity-version <version|all>` to list another version)");
-        println!("\nFunctions\n{}", functions.join("\n"));
-        println!("\nKeywords\n{}", keywords.join("\n"));
+        println!("\n## Functions\n{}", functions.join("\n"));
+        println!("\n## Keywords\n{}", keywords.join("\n"));
         return;
     }
 

@@ -35,8 +35,8 @@ fn lists_functions_then_keywords_of_the_default_version() {
     assert!(lines[0].starts_with(&format!(
         "Functions and keywords in {DEFAULT_CLARITY_VERSION} ("
     )));
-    let functions_heading = position("Functions").unwrap();
-    let keywords_heading = position("Keywords").unwrap();
+    let functions_heading = position("## Functions").unwrap();
+    let keywords_heading = position("## Keywords").unwrap();
     let map = position("map").unwrap();
     let tx_sender = position("tx-sender").unwrap();
     assert!(functions_heading < map && map < keywords_heading && keywords_heading < tx_sender);
@@ -69,7 +69,7 @@ fn describes_names_from_any_version() {
     let output = run_docs(&["block-height"]);
     assert!(output.status.success());
     assert!(stdout(&output).starts_with(
-        "# block-height\nClarity version\nAvailable since Clarity 1 through Clarity 2\n"
+        "# block-height\n## Clarity version\nAvailable since Clarity 1 through Clarity 2\n"
     ));
 }
 
@@ -77,14 +77,14 @@ fn describes_names_from_any_version() {
 fn describes_a_function() {
     let output = run_docs(&["map"]);
     assert!(output.status.success());
-    assert!(stdout(&output).starts_with("# map\nUsage\n(map func sequence_A"));
+    assert!(stdout(&output).starts_with("# map\n## Usage\n```clarity\n(map func sequence_A"));
 }
 
 #[test]
 fn describes_an_operator_by_its_symbol() {
     let output = run_docs(&["<="]);
     assert!(output.status.success());
-    assert!(stdout(&output).starts_with("# <=\nUsage\n(<= "));
+    assert!(stdout(&output).starts_with("# <=\n## Usage\n```clarity\n(<= "));
 }
 
 #[test]
