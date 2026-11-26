@@ -112,21 +112,41 @@ impl Entry {
 
 /// Joins stacks-core's hard-wrapped lines, keeping paragraphs and list items.
 fn unwrap_lines(text: &str) -> String {
+    let lines: Vec<&str> = text.lines().collect();
+    lines
+        .split(|line| line.trim().is_empty())
+        .filter(|block| !block.is_empty())
+        .map(unwrap_block)
+        .collect::<Vec<_>>()
+        .join("\n\n")
+}
+
+/// List items keep their indent relative to the block's outermost item, so nested lists stay nested.
+fn unwrap_block(lines: &[&str]) -> String {
+    let indent = |line: &str| line.len() - line.trim_start().len();
+    let is_list_item = |line: &str| {
+        let line = line.trim_start();
+        line.starts_with("* ") || line.starts_with("- ")
+    };
+    let base = lines
+        .iter()
+        .filter(|line| is_list_item(line))
+        .map(|line| indent(line))
+        .min()
+        .unwrap_or(0);
     let mut out = String::new();
-    for line in text.lines().map(str::trim) {
-        if line.is_empty() {
-            if !out.is_empty() && !out.ends_with("\n\n") {
-                out.push_str("\n\n");
+    for line in lines {
+        if is_list_item(line) {
+            if !out.is_empty() {
+                out.push('\n');
             }
-            continue;
+            out.push_str(&" ".repeat(indent(line) - base));
+        } else if !out.is_empty() {
+            out.push(' ');
         }
-        if !out.is_empty() && !out.ends_with('\n') {
-            let is_list_item = line.starts_with("* ") || line.starts_with("- ");
-            out.push(if is_list_item { '\n' } else { ' ' });
-        }
-        out.push_str(line);
+        out.push_str(line.trim());
     }
-    out.trim_end().to_string()
+    out
 }
 
 fn clarity_block(code: &str) -> String {
@@ -284,6 +304,15 @@ mod tests {
         assert!(doc.contains("to transfer\n* `(err u2)` -- "), "{doc}");
         let doc = lookup("secp256k1-decompress?").unwrap();
         assert!(doc.contains(" error code:\n- `(err u1)` "), "{doc}");
+    }
+
+    #[test]
+    fn lookup_keeps_nested_lists() {
+        let doc = lookup("get-stacks-block-info?").unwrap();
+        assert!(doc.contains("\n  - Greater than the timestamp"), "{doc}");
+        let doc = lookup("get-burn-block-info?").unwrap();
+        assert!(doc.contains(":\n* They each have type signature"), "{doc}");
+        assert!(doc.contains("following:\n   * `0x00` means"), "{doc}");
     }
 
     #[test]

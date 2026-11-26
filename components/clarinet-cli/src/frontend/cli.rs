@@ -505,7 +505,7 @@ struct ApplyDeployment {
 )]
 struct Docs {
     /// Functions or keywords to describe; lists them all when omitted
-    #[clap(value_name = "NAME", allow_hyphen_values = true)]
+    #[clap(value_name = "NAME")]
     pub names: Vec<String>,
     /// Clarity version to list: a number (`3`), a name (`clarity3`) or `all` [default: the version new contracts use]
     #[clap(

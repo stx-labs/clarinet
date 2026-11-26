@@ -89,9 +89,16 @@ fn describes_an_operator_by_its_symbol() {
 
 #[test]
 fn describes_an_operator_as_listed() {
-    let output = run_docs(&["- (subtract)"]);
+    let output = run_docs(&["--", "- (subtract)"]);
     assert!(output.status.success());
     assert!(stdout(&output).starts_with("# - (subtract)\n## Usage\n"));
+}
+
+#[test]
+fn keeps_flags_after_names() {
+    let output = run_docs(&["map", "--help"]);
+    assert!(output.status.success());
+    assert!(stdout(&output).starts_with("Display Clarity documentation"));
 }
 
 #[test]
