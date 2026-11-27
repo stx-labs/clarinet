@@ -4,7 +4,7 @@ use std::sync::LazyLock;
 
 use clarinet_deployments::types::*;
 use clarinet_deployments::update_session_with_deployment_plan;
-use clarinet_files::StacksNetwork;
+use clarinet_files::{StacksNetwork, DEFAULT_SBTC_BALANCE};
 use clarity::types::chainstate::StacksAddress;
 use clarity::types::{Address, StacksEpochId};
 use clarity::vm::types::StandardPrincipalData;
@@ -40,7 +40,7 @@ fn build_test_deployement_plan(
 /// A genesis spec with a single wallet, whose `sbtc_balance` is what each test
 /// varies. The STX balance is fixed so it can double as a control: it must be
 /// credited whether or not the sBTC mint happens.
-fn genesis_with_sbtc_balance(sbtc_balance: u128) -> GenesisSpecification {
+fn genesis_with_sbtc_balance(sbtc_balance: Option<u128>) -> GenesisSpecification {
     GenesisSpecification {
         contracts: vec![],
         wallets: vec![WalletSpecification {
@@ -63,7 +63,7 @@ fn epoch_3_0_batch() -> TransactionsBatchSpecification {
 }
 
 /// A session at epoch 3.0, funded from a one-wallet genesis spec.
-fn funded_session(sbtc_balance: u128) -> Session {
+fn funded_session(sbtc_balance: Option<u128>) -> Session {
     let mut session = Session::new(SessionSettings::default());
     let genesis = genesis_with_sbtc_balance(sbtc_balance);
     let deployment = build_test_deployement_plan(vec![epoch_3_0_batch()], Some(genesis));
@@ -74,7 +74,7 @@ fn funded_session(sbtc_balance: u128) -> Session {
 #[test]
 fn fund_genesis_account_with_stx() {
     let mut session = Session::new(SessionSettings::default());
-    let genesis = genesis_with_sbtc_balance(0);
+    let genesis = genesis_with_sbtc_balance(Some(0));
     let deployment = build_test_deployement_plan(vec![], Some(genesis));
     update_session_with_deployment_plan(&mut session, &deployment, None);
 
@@ -91,7 +91,7 @@ fn fund_genesis_account_with_stx() {
 #[test]
 fn does_not_fund_sbtc_before_epoch_3_0() {
     let mut session = Session::new(SessionSettings::default());
-    let genesis = genesis_with_sbtc_balance(10_000_000_000);
+    let genesis = genesis_with_sbtc_balance(Some(10_000_000_000));
     let batch = TransactionsBatchSpecification {
         id: 0,
         epoch: Some(EpochSpec::Epoch2_5),
@@ -105,10 +105,50 @@ fn does_not_fund_sbtc_before_epoch_3_0() {
     assert!(assets_maps.contains_key("STX"));
 }
 
+#[test]
+fn only_an_explicit_sbtc_balance_counts_as_configured() {
+    assert!(!genesis_with_sbtc_balance(None).has_configured_sbtc_balance());
+    assert!(!genesis_with_sbtc_balance(Some(0)).has_configured_sbtc_balance());
+    assert!(genesis_with_sbtc_balance(Some(500)).has_configured_sbtc_balance());
+}
+
+#[test]
+fn funds_the_default_sbtc_balance_when_none_is_configured() {
+    let session = funded_session(None);
+
+    let sbtcs = session.get_assets_maps();
+    let sbtcs = sbtcs
+        .get(".sbtc-token.sbtc-token")
+        .expect("sBTC should be minted");
+    assert_eq!(
+        sbtcs.get(&WALLET_1.to_string()),
+        Some(&u128::from(DEFAULT_SBTC_BALANCE))
+    );
+}
+
+#[test]
+fn plan_file_round_trips_an_unset_sbtc_balance() {
+    for sbtc_balance in [None, Some(500)] {
+        let genesis = genesis_with_sbtc_balance(sbtc_balance);
+        let yaml = yaml_serde::to_string(&genesis.to_specification_file()).unwrap();
+        assert_eq!(
+            yaml.contains("sbtc-balance"),
+            sbtc_balance.is_some(),
+            "{yaml}"
+        );
+
+        let file: GenesisSpecificationFile = yaml_serde::from_str(&yaml).unwrap();
+        assert_eq!(
+            GenesisSpecification::from_specifications(&file).unwrap(),
+            genesis
+        );
+    }
+}
+
 /// A wallet with `sbtc_balance = 0` must not show up in the sBTC asset map.
 #[test]
 fn does_not_fund_sbtc_when_the_balance_is_zero() {
-    let session = funded_session(0);
+    let session = funded_session(Some(0));
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 1);
@@ -120,7 +160,7 @@ fn does_not_fund_sbtc_when_the_balance_is_zero() {
 /// because `sbtc-token` is a boot contract.
 #[test]
 fn can_fund_initial_sbtc_balance_without_any_sbtc_transaction() {
-    let session = funded_session(10_000_000_000);
+    let session = funded_session(Some(10_000_000_000));
 
     let assets_maps = session.get_assets_maps();
     assert!(assets_maps.len() == 2);
@@ -162,7 +202,7 @@ fn can_fund_initial_sbtc_balance_with_explicit_sbtc_requirements() {
         transactions,
     };
 
-    let genesis = genesis_with_sbtc_balance(10_000_000_000);
+    let genesis = genesis_with_sbtc_balance(Some(10_000_000_000));
     let deployment = build_test_deployement_plan(vec![batch], Some(genesis));
     update_session_with_deployment_plan(&mut session, &deployment, None);
 
@@ -177,7 +217,7 @@ fn can_fund_initial_sbtc_balance_with_explicit_sbtc_requirements() {
 /// itself and not just to the session's asset map.
 #[test]
 fn can_read_the_funded_sbtc_balance_and_supply_from_clarity() {
-    let mut session = funded_session(10_000_000_000);
+    let mut session = funded_session(Some(10_000_000_000));
 
     let token = format!("'{}", *SBTC_TOKEN_MAINNET_ADDRESS);
     let balance = session.eval_clarity_string(&format!(
@@ -196,7 +236,7 @@ fn can_read_the_funded_sbtc_balance_and_supply_from_clarity() {
 /// balance is just a starting balance, so it is credited as configured.
 #[test]
 fn funds_an_sbtc_balance_below_the_bitcoin_dust_limit() {
-    let mut session = funded_session(500);
+    let mut session = funded_session(Some(500));
 
     let sbtcs = session.get_assets_maps();
     let sbtcs = sbtcs
@@ -217,7 +257,7 @@ fn funds_an_sbtc_balance_below_the_bitcoin_dust_limit() {
 fn funding_sbtc_runs_at_the_session_epoch() {
     use clarity::vm::database::ClarityBackingStore;
 
-    let mut session = funded_session(10_000_000_000);
+    let mut session = funded_session(Some(10_000_000_000));
     let epoch = session.interpreter.datastore.get_current_epoch();
     let clarity_db_epoch = session
         .interpreter
