@@ -65,6 +65,14 @@ fn rejects_an_unknown_version() {
 }
 
 #[test]
+fn rejects_an_unknown_flag_without_a_project() {
+    let output = run_docs(&["--foo"]);
+    assert_eq!(output.status.code(), Some(2));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unexpected argument '--foo'"), "{stderr}");
+}
+
+#[test]
 fn describes_names_from_any_version() {
     let output = run_docs(&["block-height"]);
     assert!(output.status.success());
