@@ -1,6 +1,7 @@
 use std::io::Cursor;
 
 use clarity::codec::StacksMessageCodec;
+use clarity::types::StacksEpochId;
 use clarity::util::hash::{bytes_to_hex, hex_bytes, to_hex};
 use clarity::vm::types::Value;
 use reqwest::blocking::Client;
@@ -79,6 +80,7 @@ pub struct PoxInfo {
     pub total_liquid_supply_ustx: u64,
     pub current_cycle: CurrentPoxCycle,
     pub next_cycle: NextPoxCycle,
+    pub current_epoch: StacksEpochId,
 }
 
 #[cfg_attr(feature = "mock", derive(Serialize))]

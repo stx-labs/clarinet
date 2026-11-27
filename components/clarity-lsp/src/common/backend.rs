@@ -1379,7 +1379,10 @@ mod lsp_tests {
     async fn test_removed_analysis_settings_publish_and_clear_manifest_diagnostics() {
         let mut file_accessor =
             TestFileAccessor::new("(define-read-only (get-count) u0)".to_string());
-        let clean_manifest = file_accessor.project_manifest.clone();
+        let clean_manifest = file_accessor
+            .project_manifest
+            .replace("epoch = 'latest'", "epoch = '4.1'")
+            .replace("clarity_version = 3", "clarity_version = 7");
         file_accessor.project_manifest = clean_manifest.replacen(
             "name = 'test-project'",
             "name = 'test-project'\nanalysis = ['check_checker']",

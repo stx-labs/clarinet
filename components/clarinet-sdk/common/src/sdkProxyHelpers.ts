@@ -112,7 +112,7 @@ export type CallReadOnlyFn = (
 ) => ParsedTransactionResult;
 
 export type DeployContractOptions = {
-  clarityVersion: ClarityVersion;
+  clarityVersion: ClarityVersion | 7;
 };
 /** Deploy using the node's initialization rules. Success returns `(ok true)`,
  * regardless of the initializer's final expression. */

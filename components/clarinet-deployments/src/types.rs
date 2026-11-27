@@ -47,6 +47,29 @@ pub enum EpochSpec {
     Epoch3_4,
     #[serde(rename = "4.0")]
     Epoch4_0,
+    #[serde(rename = "4.1")]
+    Epoch4_1,
+}
+
+impl EpochSpec {
+    pub fn start_height(self, config: &DevnetConfig) -> Option<u64> {
+        match self {
+            Self::Epoch2_0 => Some(config.epoch_2_0),
+            Self::Epoch2_05 => Some(config.epoch_2_05),
+            Self::Epoch2_1 => Some(config.epoch_2_1),
+            Self::Epoch2_2 => Some(config.epoch_2_2),
+            Self::Epoch2_3 => Some(config.epoch_2_3),
+            Self::Epoch2_4 => Some(config.epoch_2_4),
+            Self::Epoch2_5 => Some(config.epoch_2_5),
+            Self::Epoch3_0 => Some(config.epoch_3_0),
+            Self::Epoch3_1 => Some(config.epoch_3_1),
+            Self::Epoch3_2 => Some(config.epoch_3_2),
+            Self::Epoch3_3 => Some(config.epoch_3_3),
+            Self::Epoch3_4 => Some(config.epoch_3_4),
+            Self::Epoch4_0 => config.epoch_4_0,
+            Self::Epoch4_1 => config.epoch_4_1,
+        }
+    }
 }
 
 impl From<StacksEpochId> for EpochSpec {
@@ -66,9 +89,7 @@ impl From<StacksEpochId> for EpochSpec {
             StacksEpochId::Epoch34 => EpochSpec::Epoch3_4,
             StacksEpochId::Epoch40 => EpochSpec::Epoch4_0,
             StacksEpochId::Epoch10 => unreachable!("epoch 1.0 is not supported"),
-            // Clarinet has no `EpochSpec` for 4.1 yet, so a manifest cannot name
-            // it and `DEFAULT_EPOCH` is still 4.0 — nothing can reach this arm.
-            StacksEpochId::Epoch41 => unreachable!("epoch 4.1 is not supported"),
+            StacksEpochId::Epoch41 => EpochSpec::Epoch4_1,
         }
     }
 }
@@ -89,8 +110,19 @@ impl From<EpochSpec> for StacksEpochId {
             EpochSpec::Epoch3_3 => StacksEpochId::Epoch33,
             EpochSpec::Epoch3_4 => StacksEpochId::Epoch34,
             EpochSpec::Epoch4_0 => StacksEpochId::Epoch40,
+            EpochSpec::Epoch4_1 => StacksEpochId::Epoch41,
         }
     }
+}
+
+/// The epoch a plan batch targets: its own, or the network default when omitted.
+pub(crate) fn planned_batch_epoch(
+    epoch: Option<EpochSpec>,
+    network: &StacksNetwork,
+) -> StacksEpochId {
+    epoch
+        .map(StacksEpochId::from)
+        .unwrap_or_else(|| network.default_epoch())
 }
 
 #[derive(Serialize, Deserialize, Debug)]
@@ -113,22 +145,7 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
     fn from(config: &DevnetConfig) -> Self {
         let epochs: Vec<EpochConfig> = EpochSpec::iter()
             .filter_map(|epoch| {
-                let start_height = match epoch {
-                    EpochSpec::Epoch2_0 => Some(config.epoch_2_0),
-                    EpochSpec::Epoch2_05 => Some(config.epoch_2_05),
-                    EpochSpec::Epoch2_1 => Some(config.epoch_2_1),
-                    EpochSpec::Epoch2_2 => Some(config.epoch_2_2),
-                    EpochSpec::Epoch2_3 => Some(config.epoch_2_3),
-                    EpochSpec::Epoch2_4 => Some(config.epoch_2_4),
-                    EpochSpec::Epoch2_5 => Some(config.epoch_2_5),
-                    EpochSpec::Epoch3_0 => Some(config.epoch_3_0),
-                    EpochSpec::Epoch3_1 => Some(config.epoch_3_1),
-                    EpochSpec::Epoch3_2 => Some(config.epoch_3_2),
-                    EpochSpec::Epoch3_3 => Some(config.epoch_3_3),
-                    EpochSpec::Epoch3_4 => Some(config.epoch_3_4),
-                    EpochSpec::Epoch4_0 => config.epoch_4_0,
-                };
-                start_height.map(|start_height| EpochConfig {
+                epoch.start_height(config).map(|start_height| EpochConfig {
                     epoch_name: epoch,
                     start_height,
                 })
@@ -141,12 +158,15 @@ impl From<&DevnetConfig> for BurnchainEpochConfig {
     }
 }
 
-fn try_clarity_version_from_option(value: Option<u8>) -> Result<ClarityVersion, String> {
+fn try_clarity_version_from_option(
+    value: Option<u8>,
+    epoch: StacksEpochId,
+) -> Result<ClarityVersion, String> {
     match value {
         Some(v) => clarity_version_from_u8(v).ok_or_else(|| {
             "unable to parse clarity_version (can either be '1', '2', '3', '4', '5', '6', or '7')".to_string()
         }),
-        None => Ok(DEFAULT_CLARITY_VERSION),
+        None => Ok(ClarityVersion::default_for_epoch(epoch)),
     }
 }
 
@@ -592,6 +612,7 @@ impl ContractPublishSpecification {
     pub fn from_specifications(
         specs: &ContractPublishSpecificationFile,
         project_root_location: &Path,
+        epoch: StacksEpochId,
     ) -> Result<ContractPublishSpecification, String> {
         let Ok(contract_name) = ContractName::try_from(specs.contract_name.to_string()) else {
             return Err(format!(
@@ -612,7 +633,15 @@ impl ContractPublishSpecification {
             .ok_or_else(|| format!("unable to parse path '{}'", specs.path))?;
 
         let source = paths::read_content_as_utf8(&location)?;
-        let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
+        // Saved versioned project publishes used this default regardless of the batch label.
+        let clarity_version = match specs.clarity_version {
+            None if epoch >= StacksEpochId::Epoch21
+                && !epoch.rejects_versioned_smart_contracts() =>
+            {
+                DEFAULT_CLARITY_VERSION
+            }
+            version => try_clarity_version_from_option(version, epoch)?,
+        };
 
         Ok(ContractPublishSpecification {
             contract_name,
@@ -681,6 +710,7 @@ impl RequirementPublishSpecification {
     pub fn from_specifications(
         specs: &RequirementPublishSpecificationFile,
         project_root_location: &Path,
+        epoch: StacksEpochId,
     ) -> Result<RequirementPublishSpecification, String> {
         let Ok(contract_id) = QualifiedContractIdentifier::parse(&specs.contract_id) else {
             return Err(format!(
@@ -702,7 +732,7 @@ impl RequirementPublishSpecification {
             .ok_or_else(|| format!("unable to parse path '{}'", specs.path))?;
 
         let source = paths::read_content_as_utf8(&location)?;
-        let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
+        let clarity_version = try_clarity_version_from_option(specs.clarity_version, epoch)?;
 
         Ok(RequirementPublishSpecification {
             contract_id,
@@ -777,6 +807,7 @@ impl EmulatedContractPublishSpecification {
         specs: &EmulatedContractPublishSpecificationFile,
         project_root: &Path,
         source: Option<String>,
+        epoch: StacksEpochId,
     ) -> Result<EmulatedContractPublishSpecification, String> {
         let Ok(contract_name) = ContractName::try_from(specs.contract_name.to_string()) else {
             return Err(format!(
@@ -800,7 +831,7 @@ impl EmulatedContractPublishSpecification {
             Some(source) => source,
             None => paths::read_content_as_utf8(&location)?,
         };
-        let clarity_version = try_clarity_version_from_option(specs.clarity_version)?;
+        let clarity_version = try_clarity_version_from_option(specs.clarity_version, epoch)?;
         let remap_principals = parse_remap_principals(specs.remap_principals.as_ref())?;
 
         Ok(EmulatedContractPublishSpecification {
@@ -1020,6 +1051,7 @@ impl DeploymentSpecification {
                 let mut genesis = None;
                 if let Some(ref plan) = specs.plan {
                     for batch in plan.batches.iter() {
+                        let epoch = planned_batch_epoch(batch.epoch, network);
                         let mut transactions = vec![];
                         for tx in batch.transactions.iter() {
                             let transaction = match tx {
@@ -1037,7 +1069,7 @@ impl DeploymentSpecification {
                                             .unwrap_or_else(|| panic!("missing contract source for {}", spec.path))
                                     });
 
-                                    let spec = EmulatedContractPublishSpecification::from_specifications(spec, project_root, source)?;
+                                    let spec = EmulatedContractPublishSpecification::from_specifications(spec, project_root, source, epoch)?;
                                     let contract_id = QualifiedContractIdentifier::new(spec.emulated_sender.clone(), spec.contract_name.clone());
                                     contracts.insert(contract_id, (spec.source.clone(), spec.location.clone()));
                                     TransactionSpecification::EmulatedContractPublish(spec)
@@ -1071,6 +1103,7 @@ impl DeploymentSpecification {
                 let mut batches = vec![];
                 if let Some(ref plan) = specs.plan {
                     for batch in plan.batches.iter() {
+                        let epoch = planned_batch_epoch(batch.epoch, network);
                         let mut transactions = vec![];
                         for tx in batch.transactions.iter() {
                             let transaction = match tx {
@@ -1081,7 +1114,7 @@ impl DeploymentSpecification {
                                     if matches!(network, StacksNetwork::Mainnet) {
                                         return Err(format!("{} only supports transactions of type 'contract-call' and 'contract-publish", specs.network.to_lowercase()))
                                     }
-                                    let mut spec = RequirementPublishSpecification::from_specifications(spec, project_root)?;
+                                    let mut spec = RequirementPublishSpecification::from_specifications(spec, project_root, epoch)?;
 
                                     // Devnet/Testnet broadcast RequirementPublish on-chain;
                                     // strip `#[env(simnet)]` from those sources too.
@@ -1094,7 +1127,7 @@ impl DeploymentSpecification {
                                     TransactionSpecification::RequirementPublish(spec)
                                 }
                                 TransactionSpecificationFile::ContractPublish(spec) => {
-                                    let mut spec = ContractPublishSpecification::from_specifications(spec, project_root)?;
+                                    let mut spec = ContractPublishSpecification::from_specifications(spec, project_root, epoch)?;
 
                                     // Devnet/Testnet/Mainnet are all on-chain; strip
                                     // `#[env(simnet)]` code from the source that gets broadcast.
@@ -1536,6 +1569,150 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+
+    #[test]
+    fn omitted_publish_version_follows_epoch_but_explicit_pin_is_preserved() {
+        for (epoch, expected) in [
+            (StacksEpochId::Epoch20, ClarityVersion::Clarity1),
+            (StacksEpochId::Epoch40, ClarityVersion::Clarity6),
+            (StacksEpochId::Epoch41, ClarityVersion::Clarity7),
+        ] {
+            assert_eq!(
+                try_clarity_version_from_option(None, epoch).unwrap(),
+                expected
+            );
+            assert_eq!(
+                try_clarity_version_from_option(Some(1), epoch).unwrap(),
+                ClarityVersion::Clarity1
+            );
+        }
+    }
+
+    #[test]
+    fn plan_publish_defaults_use_batch_epoch_or_network() {
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("contract.clar"),
+            "(define-public (run) (ok true))",
+        )
+        .unwrap();
+        let sender = "ST000000000000000000002AMW42H";
+
+        for network in [
+            StacksNetwork::Simnet,
+            StacksNetwork::Devnet,
+            StacksNetwork::Testnet,
+            StacksNetwork::Mainnet,
+        ] {
+            for epoch in [
+                None,
+                Some(EpochSpec::Epoch3_0),
+                Some(EpochSpec::Epoch4_0),
+                Some(EpochSpec::Epoch4_1),
+            ] {
+                let transaction = if network == StacksNetwork::Simnet {
+                    TransactionSpecificationFile::EmulatedContractPublish(
+                        EmulatedContractPublishSpecificationFile {
+                            contract_name: "contract".into(),
+                            emulated_sender: sender.into(),
+                            path: "contract.clar".into(),
+                            clarity_version: None,
+                            remap_principals: None,
+                        },
+                    )
+                } else {
+                    TransactionSpecificationFile::ContractPublish(
+                        ContractPublishSpecificationFile {
+                            contract_name: "contract".into(),
+                            expected_sender: sender.into(),
+                            path: "contract.clar".into(),
+                            clarity_version: None,
+                            cost: 0,
+                            anchor_block_only: None,
+                        },
+                    )
+                };
+                let file = DeploymentSpecificationFile {
+                    id: None,
+                    name: "test".into(),
+                    network: "test".into(),
+                    stacks_node: None,
+                    bitcoin_node: None,
+                    node: None,
+                    genesis: None,
+                    contract_remaps: None,
+                    plan: Some(TransactionPlanSpecificationFile {
+                        batches: vec![TransactionsBatchSpecificationFile {
+                            id: 0,
+                            epoch,
+                            transactions: vec![transaction],
+                        }],
+                    }),
+                };
+                let deployment = DeploymentSpecification::from_specifications(
+                    &file,
+                    &network,
+                    directory.path(),
+                    None,
+                )
+                .unwrap();
+                let expected = match (&network, epoch) {
+                    (StacksNetwork::Simnet, Some(EpochSpec::Epoch3_0)) => ClarityVersion::Clarity3,
+                    (_, Some(EpochSpec::Epoch4_1)) => ClarityVersion::Clarity7,
+                    _ => ClarityVersion::Clarity6,
+                };
+                let version = match &deployment.plan.batches[0].transactions[0] {
+                    TransactionSpecification::ContractPublish(spec) => spec.clarity_version,
+                    TransactionSpecification::EmulatedContractPublish(spec) => spec.clarity_version,
+                    _ => unreachable!(),
+                };
+                assert_eq!(version, expected, "{network:?} {epoch:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn epoch_4_1_converts_and_round_trips() {
+        let epoch = EpochSpec::from(StacksEpochId::Epoch41);
+        assert_eq!(epoch, EpochSpec::Epoch4_1);
+        assert_eq!(StacksEpochId::from(epoch), StacksEpochId::Epoch41);
+        let encoded = to_yaml(&epoch).unwrap();
+        assert_eq!(from_yaml::<EpochSpec>(&encoded).unwrap(), epoch);
+    }
+
+    #[test]
+    fn epoch_4_1_schedule_is_opt_in_and_preserves_history() {
+        let mut config = DevnetConfig::default();
+        assert_eq!(EpochSpec::Epoch4_1.start_height(&config), None);
+        let historical = BurnchainEpochConfig::from(&config);
+        assert!(!historical
+            .burnchain
+            .epochs
+            .iter()
+            .any(|epoch| { epoch.epoch_name == EpochSpec::Epoch4_1 }));
+
+        config.epoch_4_1 = Some(200);
+        let schedule = BurnchainEpochConfig::from(&config);
+        assert_eq!(
+            schedule.burnchain.epochs.len(),
+            historical.burnchain.epochs.len() + 1
+        );
+        for (old, new) in historical
+            .burnchain
+            .epochs
+            .iter()
+            .zip(&schedule.burnchain.epochs)
+        {
+            assert_eq!(old.epoch_name, new.epoch_name);
+            assert_eq!(old.start_height, new.start_height);
+        }
+        let epoch = schedule.burnchain.epochs.last().unwrap();
+        assert_eq!(epoch.epoch_name, EpochSpec::Epoch4_1);
+        assert_eq!(epoch.start_height, 200);
+        let encoded = toml::to_string(&schedule).unwrap();
+        let decoded: BurnchainEpochConfig = toml::from_str(&encoded).unwrap();
+        assert_eq!(decoded.burnchain.epochs.last().unwrap().start_height, 200);
+    }
 
     #[test]
     fn test_epoch_config() {

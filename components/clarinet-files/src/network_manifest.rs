@@ -2,6 +2,7 @@ use std::collections::BTreeMap;
 use std::path::Path;
 use std::sync::LazyLock;
 
+use clarinet_defaults::{DEFAULT_EPOCH, MAINNET_DEFAULT_EPOCH, TESTNET_DEFAULT_EPOCH};
 use clarinet_utils::{
     decrypt_mnemonic_phrase, get_bip32_keys_from_mnemonic, mnemonic_from_phrase, random_mnemonic,
     DerivedKeys, MnemonicEncryptionStrength,
@@ -11,6 +12,7 @@ pub use clarinet_utils::{
     DEFAULT_STACKS_MINER_MNEMONIC,
 };
 use clarity::types::chainstate::{StacksAddress, StacksPrivateKey};
+use clarity::types::StacksEpochId;
 use clarity::util::hash::bytes_to_hex;
 use clarity::util::secp256k1::Secp256k1PublicKey;
 use clarity_repl::utils::Environment;
@@ -20,6 +22,7 @@ use toml::value::Value;
 use super::FileAccessor;
 use crate::paths;
 
+// This published release includes the configurable 4.1 schedule and Clarity 7.
 pub const DEFAULT_STACKS_NODE_IMAGE: &str = "ghcr.io/stacks-network/stacks-core:4.0.5-alpine";
 pub const DEFAULT_STACKS_SIGNER_IMAGE: &str = "ghcr.io/stacks-network/stacks-signer:4.0.5-alpine";
 pub const DEFAULT_STACKS_API_IMAGE: &str = "hirosystems/stacks-blockchain-api:latest";
@@ -98,6 +101,15 @@ pub enum BitcoinNetwork {
 }
 
 impl StacksNetwork {
+    /// The deterministic offline epoch for this network.
+    pub fn default_epoch(&self) -> StacksEpochId {
+        match self {
+            Self::Mainnet => MAINNET_DEFAULT_EPOCH,
+            Self::Testnet => TESTNET_DEFAULT_EPOCH,
+            Self::Simnet | Self::Devnet => DEFAULT_EPOCH,
+        }
+    }
+
     pub fn get_networks(&self) -> (BitcoinNetwork, StacksNetwork) {
         use StacksNetwork::*;
 
@@ -209,6 +221,7 @@ pub struct DevnetConfigFile {
     pub epoch_3_3: Option<u64>,
     pub epoch_3_4: Option<u64>,
     pub epoch_4_0: Option<u64>,
+    pub epoch_4_1: Option<u64>,
     pub use_docker_gateway_routing: Option<bool>,
     pub docker_platform: Option<String>,
 }
@@ -352,6 +365,7 @@ pub struct DevnetConfig {
     pub epoch_3_3: u64,
     pub epoch_3_4: u64,
     pub epoch_4_0: Option<u64>,
+    pub epoch_4_1: Option<u64>,
     pub use_docker_gateway_routing: bool,
     pub docker_platform: Option<String>,
 }
@@ -787,6 +801,7 @@ impl NetworkManifest {
                 epoch_3_3: devnet_config.epoch_3_3.unwrap_or(DEFAULT_EPOCH_3_3),
                 epoch_3_4: devnet_config.epoch_3_4.unwrap_or(DEFAULT_EPOCH_3_4),
                 epoch_4_0: Some(devnet_config.epoch_4_0.unwrap_or(DEFAULT_EPOCH_4_0)),
+                epoch_4_1: devnet_config.epoch_4_1,
                 stacks_node_env_vars: devnet_config
                     .stacks_node_env_vars
                     .take()
@@ -917,6 +932,7 @@ impl Default for DevnetConfig {
             epoch_3_3: DEFAULT_EPOCH_3_3,
             epoch_3_4: DEFAULT_EPOCH_3_4,
             epoch_4_0: Some(DEFAULT_EPOCH_4_0),
+            epoch_4_1: None,
             use_docker_gateway_routing: false,
             docker_platform: None,
         }
@@ -1047,6 +1063,49 @@ mod tests {
 
     fn parse_devnet_settings(settings: &str) -> DevnetConfig {
         try_parse_devnet_settings(settings).unwrap()
+    }
+
+    #[test]
+    fn default_epochs_are_network_specific_and_offline_is_stable() {
+        use clarinet_defaults::{MAINNET_DEFAULT_EPOCH, TESTNET_DEFAULT_EPOCH};
+        use clarity::types::StacksEpochId;
+        use clarity::vm::ClarityVersion;
+
+        assert_eq!(
+            StacksNetwork::Mainnet.default_epoch(),
+            MAINNET_DEFAULT_EPOCH
+        );
+        assert_eq!(
+            StacksNetwork::Testnet.default_epoch(),
+            TESTNET_DEFAULT_EPOCH
+        );
+        for network in [StacksNetwork::Simnet, StacksNetwork::Devnet] {
+            assert_eq!(network.default_epoch(), DEFAULT_EPOCH);
+        }
+        assert_eq!(DEFAULT_EPOCH, StacksEpochId::Epoch40);
+        assert_eq!(
+            ClarityVersion::default_for_epoch(StacksNetwork::Mainnet.default_epoch()),
+            ClarityVersion::Clarity6
+        );
+        assert_eq!(
+            ClarityVersion::default_for_epoch(StacksNetwork::Testnet.default_epoch()),
+            ClarityVersion::Clarity6
+        );
+    }
+
+    #[test]
+    fn epoch_4_1_schedule_is_optional_and_round_trips() {
+        let settings = "[network]\nname = \"devnet\"\n";
+        let historical = parse_devnet_settings(settings);
+        assert_eq!(historical.epoch_4_1, None);
+        assert_eq!(DevnetConfig::default().epoch_4_1, None);
+        let config = parse_devnet_settings(&format!("{settings}[devnet]\nepoch_4_1 = 200\n"));
+        assert_eq!(config.epoch_4_1, Some(200));
+        assert_eq!(config.epoch_4_0, historical.epoch_4_0);
+        let file: DevnetConfigFile = toml::from_str("epoch_4_1 = 200").unwrap();
+        let encoded = toml::to_string(&file).unwrap();
+        let decoded: DevnetConfigFile = toml::from_str(&encoded).unwrap();
+        assert_eq!(decoded.epoch_4_1, Some(200));
     }
 
     #[test]

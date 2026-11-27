@@ -7,6 +7,7 @@ use std::rc::Rc;
 use clarity::codec::StacksMessageCodec;
 use clarity::types::StacksEpochId;
 use clarity::vm::ast::ContractAST;
+use clarity::vm::contexts::TRANSIENT_CONTRACT_NAME;
 use clarity::vm::diagnostic::{Diagnostic, Level};
 use clarity::vm::hooks::EvalHook;
 use clarity::vm::types::BoundedErrorString;
@@ -931,13 +932,28 @@ impl Session {
             return Err(ExecutionError::rejected(vec![diagnostic]));
         }
 
-        if contract.clarity_version > ClarityVersion::default_for_epoch(contract.epoch.resolve()) {
+        if !super::is_deployable_clarity_version(contract.clarity_version, current_epoch) {
             let diagnostic = Diagnostic {
                 level: Level::Error,
                 message: bounded_format!(
                     "{} can not be used with {}",
                     contract.clarity_version,
                     contract.epoch
+                ),
+                spans: vec![],
+                suggestion: None,
+            };
+            return Err(ExecutionError::rejected(vec![diagnostic]));
+        }
+
+        if current_epoch.rejects_transient_contracts()
+            && contract.name.as_str() == TRANSIENT_CONTRACT_NAME
+        {
+            let diagnostic = Diagnostic {
+                level: Level::Error,
+                message: bounded_format!(
+                    "Transient contract not supported in Epoch {}",
+                    current_epoch
                 ),
                 spans: vec![],
                 suggestion: None,
@@ -1558,7 +1574,7 @@ impl Session {
         let epoch = match cmd.split_once(' ').and_then(|(_, epoch)| super::epoch_from_str(epoch)) {
             Some(epoch) => epoch,
             None => {
-                return Err("Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4 | 4.0"
+                return Err("Usage: ::set_epoch 2.0 | 2.05 | 2.1 | 2.2 | 2.3 | 2.4 | 2.5 | 3.0 | 3.1 | 3.2 | 3.3 | 3.4 | 4.0 | 4.1"
                     .red()
                     .to_string())
             }
@@ -2236,33 +2252,21 @@ mod tests {
             initial_block_height + 1
         );
 
-        // The latest epoch clarinet supports, which deliberately trails
-        // `StacksEpochId::latest()` until an epoch is adopted here — adoption
-        // means `epoch_from_str`, `EpochSpec`, and the devnet config, not just
-        // the interpreter.
+        // The deterministic default need not be the newest supported epoch.
         let supported_latest = DEFAULT_EPOCH.to_string();
         session.handle_command(&format!("::set_epoch {supported_latest}"));
         let current_epoch = session.handle_command("::get_epoch");
         assert_eq!(current_epoch, format!("Current epoch: {supported_latest}"));
 
-        // Canary for upstream adding an epoch. Clarinet supports through 4.0;
-        // 4.1 exists upstream but is not adopted here. If this fails, upstream
-        // has moved again — adopt the pending epoch, or re-pin this and say why.
-        assert_eq!(
-            StacksEpochId::ALL.last(),
-            Some(&StacksEpochId::Epoch41),
-            "upstream added an epoch past the one clarinet knows is pending"
-        );
-
-        // An unadopted epoch is reported as unusable rather than silently
-        // ignored, so the session never lands somewhere the caller didn't ask for.
-        let result = session.handle_command("::set_epoch 4.1");
+        assert_eq!(StacksEpochId::ALL.last(), Some(&StacksEpochId::Epoch41));
+        session.handle_command("::set_epoch 4.1");
+        assert_eq!(session.handle_command("::get_epoch"), "Current epoch: 4.1");
+        let result = session.handle_command("::set_epoch 4.2");
         assert!(
             result.contains("Usage:"),
             "expected usage error, got: {result}"
         );
-        let current_epoch = session.handle_command("::get_epoch");
-        assert_eq!(current_epoch, format!("Current epoch: {supported_latest}"));
+        assert_eq!(session.handle_command("::get_epoch"), "Current epoch: 4.1");
     }
 
     #[test]
@@ -2444,10 +2448,67 @@ mod tests {
     }
 
     #[test]
+    fn transient_deploy_is_rejected_before_changing_sender_nonce_or_state() {
+        let mut session = Session::new_without_boot_contracts(SessionSettings {
+            epoch_id: Some(StacksEpochId::Epoch41),
+            ..SessionSettings::default()
+        });
+        let sender = session.get_tx_sender();
+        let deployer = "ST1SJ3DTE5DN7X54YDH5D64R3BCB6A2AG2ZQ8YPD5";
+        assert_ne!(sender, deployer);
+        let mut contract = ClarityContractBuilder::new()
+            .name("__transient")
+            .deployer(deployer)
+            .epoch(StacksEpochId::Epoch41)
+            .clarity_version(ClarityVersion::Clarity7)
+            .build();
+        let contract_id = contract.expect_resolved_contract_identifier(None);
+
+        for skip_analysis in [false, true] {
+            contract.skip_analysis = skip_analysis;
+            let error = session
+                .deploy_contract_with_inclusion(
+                    &contract,
+                    false,
+                    None,
+                    PostConditionCheck::Unchecked,
+                    None,
+                )
+                .unwrap_err();
+            assert_eq!(
+                error.inclusion,
+                crate::repl::interpreter::BlockInclusion::Rejected
+            );
+            assert!(error.diagnostics[0]
+                .diagnostic
+                .message
+                .contains("Transient contract not supported in Epoch 4.1"));
+            assert_eq!(session.get_tx_sender(), sender);
+            assert_eq!(session.get_nonce(&principal(deployer)).unwrap(), 0);
+            assert!(!session.contracts.contains_key(&contract_id));
+        }
+
+        assert_eq!(
+            run_session_snippet(&mut session, "(+ u1 u2)"),
+            Value::UInt(3)
+        );
+        assert_eq!(session.get_tx_sender(), sender);
+        assert_eq!(session.get_nonce(&principal(&sender)).unwrap(), 0);
+    }
+
+    #[test]
     fn boot_contracts_do_not_bump_a_nonce() {
         // Boot contracts are genesis state on mainnet, not transactions, and
         // they bypass `deploy_contract` entirely.
-        let mut session = Session::new(SessionSettings::default());
+        let mut session = Session::new(SessionSettings {
+            epoch_id: Some(StacksEpochId::Epoch41),
+            ..SessionSettings::default()
+        });
+
+        for address in [BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS] {
+            let id = QualifiedContractIdentifier::parse(&format!("{address}.pox-4")).unwrap();
+            assert!(session.boot_contracts.contains_key(&id));
+        }
 
         for addr in [BOOT_MAINNET_ADDRESS, BOOT_TESTNET_ADDRESS] {
             assert_eq!(session.get_nonce(&principal(addr)).unwrap(), 0);

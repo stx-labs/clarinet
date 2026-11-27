@@ -371,14 +371,11 @@ impl ProjectManifest {
         ]
         .into_iter()
         .flatten()
-        .map(|message| {
-            clarity_repl::ueprint!("Warning: {message}");
-            Diagnostic {
-                level: Level::Warning,
-                message: message.into(),
-                spans: vec![],
-                suggestion: None,
-            }
+        .map(|message| Diagnostic {
+            level: Level::Warning,
+            message: message.into(),
+            spans: vec![],
+            suggestion: None,
         })
         .collect();
         let mut repl_settings = project_manifest_file
@@ -523,6 +520,28 @@ impl ProjectManifest {
             }
         };
 
+        let deployment_version = ClarityVersion::default_for_epoch(StacksEpochId::Epoch41);
+        config.diagnostics.extend(
+            config_contracts
+                .values()
+                .filter(|contract| contract.clarity_version < deployment_version)
+                .map(|contract| Diagnostic {
+                    level: Level::Warning,
+                    message: stacks_common::bounded_format!(
+                        "Contract `{}` resolves to epoch {} / {} and cannot be newly deployed at that Clarity version in epoch 4.1 or later. Existing deployed contracts remain callable.",
+                        contract.name,
+                        contract.epoch.resolve(),
+                        contract.clarity_version,
+                    ),
+                    spans: vec![],
+                    suggestion: Some(format!(
+                        "Test the source under {deployment_version}, then set epoch = \"4.1\" and clarity_version = {} in [contracts.{}] before deploying to a 4.1+ network.",
+                        clarity_repl::repl::clarity_version_to_u8(deployment_version),
+                        contract.name,
+                    )),
+                }),
+        );
+
         config.contracts = config_contracts;
         config.contracts_settings = contracts_settings;
         config.project.requirements = Some(config_requirements);
@@ -548,7 +567,7 @@ fn get_epoch_and_clarity_version(
         Some("latest") => clarity_repl::repl::Epoch::Latest,
         Some(epoch) => {
             let stacks_epoch = clarity_repl::repl::epoch_from_str(epoch).ok_or(
-                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.1, 3.2, 3.3, 3.4, 4.0, latest)",
+                    "epoch field invalid (value supported: 2.0, 2.05, 2.1, 2.2, 2.3, 2.4, 2.5, 3.0, 3.1, 3.2, 3.3, 3.4, 4.0, 4.1, latest)",
                 )?;
             clarity_repl::repl::Epoch::Specific(stacks_epoch)
         }
@@ -880,6 +899,85 @@ mod tests {
             &PathBuf::from("/tmp/clarinet.toml"),
             false,
         )
+    }
+
+    #[test]
+    fn test_deployment_warnings_name_each_affected_contract() {
+        let manifest = parse_manifest(indoc! {r#"
+            [project]
+            name = "historical"
+            [contracts.first]
+            path = "contracts/first.clar"
+            epoch = "2.1"
+            clarity_version = 1
+            [contracts.second]
+            path = "contracts/second.clar"
+            epoch = "4.0"
+            clarity_version = 6
+        "#})
+        .unwrap();
+
+        assert_eq!(manifest.diagnostics.len(), 2);
+        for (diagnostic, name, epoch, version) in [
+            (&manifest.diagnostics[0], "first", "2.1", "Clarity 1"),
+            (&manifest.diagnostics[1], "second", "4.0", "Clarity 6"),
+        ] {
+            assert_eq!(diagnostic.level, Level::Warning);
+            assert!(diagnostic.message.contains(&format!("`{name}`")));
+            assert!(diagnostic
+                .message
+                .contains(&format!("epoch {epoch} / {version}")));
+            assert!(diagnostic.message.contains("cannot be newly deployed"));
+            assert!(diagnostic
+                .message
+                .contains("Existing deployed contracts remain callable"));
+            let remedy = diagnostic.suggestion.as_ref().unwrap();
+            assert!(remedy.contains("Test the source under Clarity 7"));
+            assert!(remedy.contains(&format!("[contracts.{name}]")));
+        }
+    }
+
+    #[test]
+    fn test_deployment_warnings_use_resolved_versions() {
+        let manifest = parse_manifest(indoc! {r#"
+            [project]
+            name = "defaults"
+            [contracts.omitted]
+            path = "contracts/omitted.clar"
+            [contracts.inferred]
+            path = "contracts/inferred.clar"
+            epoch = "4.0"
+            [contracts.current]
+            path = "contracts/current.clar"
+            epoch = "4.1"
+            clarity_version = 7
+            [contracts.current_inferred]
+            path = "contracts/current-inferred.clar"
+            epoch = "4.1"
+        "#})
+        .unwrap();
+
+        assert_eq!(manifest.diagnostics.len(), 2);
+        assert!(manifest.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("`omitted`")
+                && diagnostic.message.contains("epoch 2.05 / Clarity 1")
+        }));
+        assert!(manifest.diagnostics.iter().any(|diagnostic| {
+            diagnostic.message.contains("`inferred`")
+                && diagnostic.message.contains("epoch 4.0 / Clarity 6")
+        }));
+        assert_eq!(
+            manifest.contracts["omitted"].clarity_version,
+            ClarityVersion::Clarity1
+        );
+        assert_eq!(
+            manifest.contracts["omitted"].epoch.resolve(),
+            StacksEpochId::Epoch2_05
+        );
+        assert_eq!(
+            manifest.contracts["current_inferred"].clarity_version,
+            ClarityVersion::Clarity7
+        );
     }
 
     #[test]

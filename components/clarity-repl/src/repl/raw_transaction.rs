@@ -4,6 +4,7 @@ use std::collections::BTreeSet;
 use std::{iter, mem};
 
 use clarity::vm::clarity::{ClarityConnection, ClarityError, TransactionConnection};
+use clarity::vm::contexts::TRANSIENT_CONTRACT_NAME;
 use clarity::vm::database::ClarityDatabase;
 use clarity::vm::errors::VmExecutionError;
 use clarity::vm::events::StacksTransactionEvent;
@@ -54,6 +55,10 @@ pub enum RawTransactionError {
     PostCondition(#[from] stacks_transactions::UnsupportedPostCondition),
     #[error(transparent)]
     VersionedDeploy(#[from] stacks_transactions::UnsupportedVersionedDeploy),
+    #[error(transparent)]
+    ContractName(#[from] stacks_transactions::OverlongContractName),
+    #[error("Transient contract not supported in Epoch {0}")]
+    TransientContract(stacks_common::types::StacksEpochId),
     #[error("transaction payload is unsupported in simnet")]
     UnsupportedPayload,
 }
@@ -156,6 +161,16 @@ impl ClarityInterpreter {
         )?;
         if let TransactionPayload::SmartContract(_, Some(version)) = &tx.payload {
             stacks_transactions::check_versioned_deploy_supported_in_epoch(*version, epoch)?;
+        }
+        stacks_transactions::check_contract_names_supported_in_epoch(
+            &tx.payload,
+            &tx.post_conditions,
+            epoch,
+        )?;
+        if let TransactionPayload::SmartContract(contract, _) = &tx.payload {
+            if epoch.rejects_transient_contracts() && *contract.name == *TRANSIENT_CONTRACT_NAME {
+                return Err(RawTransactionError::TransientContract(epoch));
+            }
         }
         if !matches!(
             tx.payload,
@@ -609,6 +624,99 @@ mod tests {
         tx.verify(TransactionAuthVerificationMode::EnforceLowS)
             .unwrap();
         clarity::util::hash::to_hex(&tx.serialize_to_vec())
+    }
+
+    #[test]
+    fn raw_admission_gates_contract_principal_name_length_at_epoch41() {
+        use clarity_types::types::StandardPrincipalData;
+        use clarity_types::ContractName;
+
+        let fixtures = fixtures();
+        for epoch in [StacksEpochId::Epoch40, StacksEpochId::Epoch41] {
+            let mut session = Session::new(SessionSettings {
+                epoch_id: Some(epoch),
+                ..SessionSettings::default()
+            });
+            let sender = principal(&fixtures, "sender");
+            session
+                .interpreter
+                .mint_stx_balance(sender.clone(), 1_000_000)
+                .unwrap();
+            for name_len in [40, 41] {
+                let mut tx = decode(
+                    fixtures["transactions"]["transfer"]["hex"]
+                        .as_str()
+                        .unwrap(),
+                )
+                .unwrap();
+                let TransactionPayload::TokenTransfer(recipient, ..) = &mut tx.payload else {
+                    panic!("transfer fixture");
+                };
+                *recipient = PrincipalData::Contract(QualifiedContractIdentifier::new(
+                    StandardPrincipalData::transient(),
+                    ContractName::try_from("a".repeat(name_len)).unwrap(),
+                ));
+                let raw = signed_hex(tx);
+                let tx = decode(&raw).unwrap();
+                let result = session.interpreter.check_raw_transaction(&tx);
+                if epoch == StacksEpochId::Epoch41 && name_len == 41 {
+                    let error = result.unwrap_err();
+                    assert!(
+                        error.to_string().contains("not supported since Stacks 4.1"),
+                        "{error}"
+                    );
+                    assert!(!session.execute_raw_transaction(&raw).is_included());
+                    assert_eq!(session.get_nonce(&sender).unwrap(), 0);
+                    assert_eq!(balance(&mut session, &sender), 1_000_000);
+                } else {
+                    result.unwrap();
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn raw_admission_gates_transient_contract_publish_at_epoch41() {
+        use clarity_types::ContractName;
+
+        let fixtures = fixtures();
+        for epoch in [StacksEpochId::Epoch40, StacksEpochId::Epoch41] {
+            let mut session = Session::new(SessionSettings {
+                epoch_id: Some(epoch),
+                ..SessionSettings::default()
+            });
+            let sender = principal(&fixtures, "sender");
+            session
+                .interpreter
+                .mint_stx_balance(sender.clone(), 1_000_000)
+                .unwrap();
+            for name in ["ordinary", "__transient"] {
+                let mut tx =
+                    decode(fixtures["transactions"]["deploy"]["hex"].as_str().unwrap()).unwrap();
+                let TransactionPayload::SmartContract(contract, version) = &mut tx.payload else {
+                    panic!("deployment fixture");
+                };
+                contract.name = ContractName::from_literal(name);
+                *version = None;
+                let raw = signed_hex(tx);
+                let tx = decode(&raw).unwrap();
+                let result = session.interpreter.check_raw_transaction(&tx);
+                if epoch == StacksEpochId::Epoch41 && name == "__transient" {
+                    let error = result.unwrap_err();
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("Transient contract not supported"),
+                        "{error}"
+                    );
+                    assert!(!session.execute_raw_transaction(&raw).is_included());
+                    assert_eq!(session.get_nonce(&sender).unwrap(), 0);
+                    assert_eq!(balance(&mut session, &sender), 1_000_000);
+                } else {
+                    result.unwrap();
+                }
+            }
+        }
     }
 
     fn signed_sponsored_transfer(

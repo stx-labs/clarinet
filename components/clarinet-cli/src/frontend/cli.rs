@@ -713,6 +713,7 @@ pub fn main() {
             }
             Deployments::GenerateDeployment(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
+                display_manifest_diagnostics(&manifest);
 
                 let network = if cmd.devnet {
                     StacksNetwork::Devnet
@@ -809,6 +810,7 @@ pub fn main() {
             }
             Deployments::ApplyDeployment(cmd) => {
                 let manifest = load_manifest_or_exit(cmd.manifest_path, true);
+                display_manifest_diagnostics(&manifest);
 
                 let network = if cmd.devnet {
                     Some(StacksNetwork::Devnet)
@@ -1151,35 +1153,44 @@ pub fn main() {
         }
         Command::Check(cmd) if cmd.show_lints => {
             let settings = load_manifest_or_warn(cmd.manifest_path)
-                .map(|m| m.repl_settings.analysis)
+                .map(|manifest| {
+                    display_manifest_diagnostics(&manifest);
+                    manifest.repl_settings.analysis
+                })
                 .unwrap_or_else(analysis::Settings::with_default_lints);
             print_available_lints(&settings);
         }
         Command::Check(cmd) if cmd.file.is_some() => {
             let file = cmd.file.unwrap();
             // An explicit manifest must load. A manifest found by search is optional.
-            let analysis = match cmd.manifest_path {
-                Some(path) => {
-                    load_manifest_or_exit(Some(path), false)
-                        .repl_settings
-                        .analysis
-                }
-                None => get_manifest_location(None)
-                    .and_then(|location| {
-                        ProjectManifest::from_location(&location, false)
-                            .inspect_err(|message| {
-                                eprintln!(
-                                    "{} unable to load {}, using default lints",
-                                    yellow!("warning:"),
-                                    location.display()
-                                );
-                                eprintln!("{message}");
-                            })
-                            .ok()
-                    })
-                    .map(|manifest| manifest.repl_settings.analysis)
-                    .unwrap_or_else(analysis::Settings::with_default_lints),
+            let manifest = match cmd.manifest_path {
+                Some(path) => Some(load_manifest_or_exit(Some(path), false)),
+                None => get_manifest_location(None).and_then(|location| {
+                    ProjectManifest::from_location(&location, false)
+                        .inspect_err(|message| {
+                            eprintln!(
+                                "{} unable to load {}, using default lints",
+                                yellow!("warning:"),
+                                location.display()
+                            );
+                            eprintln!("{message}");
+                        })
+                        .ok()
+                }),
             };
+            if cmd.output_format == OutputFormat::Standard {
+                if let Some(manifest) = &manifest {
+                    display_manifest_diagnostics(manifest);
+                }
+            }
+            let (analysis, manifest_diagnostics) = manifest
+                .map(|manifest| {
+                    (
+                        manifest.repl_settings.analysis,
+                        Some((manifest.location, manifest.diagnostics)),
+                    )
+                })
+                .unwrap_or_else(|| (analysis::Settings::with_default_lints(), None));
             let settings = repl::SessionSettings {
                 repl_settings: repl::Settings {
                     analysis,
@@ -1234,9 +1245,18 @@ pub fn main() {
                     let mut all_diags: Vec<LintDiagnostic> =
                         diagnostics.into_iter().map(LintDiagnostic::from).collect();
                     all_diags.extend(lint_diagnostics);
+                    let mut diagnostics = HashMap::from([(file, all_diags)]);
+                    if let Some((location, manifest_diagnostics)) = manifest_diagnostics {
+                        if !manifest_diagnostics.is_empty() {
+                            diagnostics
+                                .entry(location.to_string_lossy().into_owned())
+                                .or_default()
+                                .extend(manifest_diagnostics.into_iter().map(LintDiagnostic::from));
+                        }
+                    }
                     let output = JsonCheckOutput {
                         success,
-                        diagnostics: HashMap::from([(file, all_diags)]),
+                        diagnostics,
                         environment: Environment::Simnet.to_string(),
                     };
                     let json = if cmd.output_format == OutputFormat::JsonPretty {
@@ -1290,6 +1310,12 @@ pub fn main() {
         }
         Command::Check(cmd) => {
             let manifest = load_manifest_or_exit(cmd.manifest_path, false);
+            let mut manifest_diagnostics = if cmd.output_format == OutputFormat::Standard {
+                display_manifest_diagnostics(&manifest);
+                Vec::new()
+            } else {
+                manifest.diagnostics.clone()
+            };
             let mut exit_codes = Vec::new();
             let mut global_found_env_simnet = false;
             for environment in CHECK_ENVIRONMENTS {
@@ -1322,6 +1348,16 @@ pub fn main() {
                             if let Some(lds) = artifacts.lint_diags.remove(&contract_id) {
                                 entry.extend(lds);
                             }
+                        }
+                        if !manifest_diagnostics.is_empty() {
+                            diagnostics
+                                .entry(manifest.location.to_string_lossy().into_owned())
+                                .or_default()
+                                .extend(
+                                    std::mem::take(&mut manifest_diagnostics)
+                                        .into_iter()
+                                        .map(LintDiagnostic::from),
+                                );
                         }
                         let environment = environment.to_string();
                         let output = JsonCheckOutput {
@@ -1631,6 +1667,15 @@ fn get_manifest_location_or_warn(path: Option<String>) -> Option<PathBuf> {
                 yellow!("note:")
             );
             None
+        }
+    }
+}
+
+fn display_manifest_diagnostics(manifest: &ProjectManifest) {
+    let name = manifest.location.to_string_lossy();
+    for diagnostic in &manifest.diagnostics {
+        for line in output_diagnostic(&LintDiagnostic::from(diagnostic.clone()), &name, &[]) {
+            eprintln!("{line}");
         }
     }
 }
@@ -2322,6 +2367,7 @@ fn display_deploy_hint() {
 
 fn devnet_start(cmd: DevnetStart, clarinetrc: ClarinetRC) {
     let manifest = load_manifest_or_exit(cmd.manifest_path, false);
+    display_manifest_diagnostics(&manifest);
     let project_root = &manifest.root_dir;
     println!("Computing deployment plan");
     let result = match cmd.deployment_plan_path {
