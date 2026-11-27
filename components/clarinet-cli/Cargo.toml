@@ -48,7 +48,6 @@ chrono = { workspace = true, features = ["serde"] }
 clap = { workspace = true, features = ["derive"] }
 clap_complete = { version = "4.4.4" }
 tower-lsp-server = { version = "0.23.0" }
-mac_address = { version = "1.2.1", optional = true }
 
 # Must match condition in bin.rs EXACTLY
 [target.'cfg(not(any(target_env = "msvc", target_os = "macos", all(target_arch = "aarch64", target_env = "musl"))))'.dependencies]
@@ -75,10 +74,6 @@ crate-type = ["lib"]
 [[bin]]
 name = "clarinet"
 path = "src/bin.rs"
-
-[features]
-default = ["telemetry"]
-telemetry = ["dep:mac_address"]
 
 [lints]
 workspace = true

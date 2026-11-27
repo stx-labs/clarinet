@@ -45,9 +45,6 @@ pub struct ProjectConfigFile {
     /// Project description
     #[serde(default)]
     description: Option<String>,
-    /// Enable or disable telemetry
-    #[serde(default)]
-    telemetry: Option<bool>,
     /// External contract dependencies
     #[serde(default)]
     #[cfg_attr(
@@ -143,7 +140,6 @@ pub struct ProjectConfig {
     pub name: String,
     pub authors: Vec<String>,
     pub description: String,
-    pub telemetry: bool,
     pub requirements: Option<Vec<RequirementConfig>>,
     pub builtin_remaps: bool,
     pub cache_location: PathBuf,
@@ -443,7 +439,6 @@ impl ProjectManifest {
                 .description
                 .unwrap_or_default(),
             authors: project_manifest_file.project.authors.unwrap_or_default(),
-            telemetry: project_manifest_file.project.telemetry.unwrap_or(false),
             cache_location,
             boot_contracts,
             override_boot_contracts_source,
@@ -583,11 +578,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn legacy_telemetry_setting_is_ignored() {
+        let manifest = parse_manifest(indoc! {r#"
+            [project]
+            name = "legacy"
+            telemetry = true
+        "#})
+        .unwrap();
+        assert!(manifest.diagnostics.is_empty());
+    }
+
+    #[test]
     fn test_allow_remote_data_fetching() {
         let manifest_toml = toml! {
             [project]
             name = "pyth-client"
-            telemetry = false
             [repl.remote_data]
             enabled = true
         };
@@ -753,7 +758,6 @@ mod tests {
         let manifest_toml = toml! {
             [project]
             name = "test-project"
-            telemetry = false
             [contracts.test-contract]
             path = "contracts/test.clar"
             clarity_version = 2
@@ -776,7 +780,6 @@ mod tests {
         let manifest_toml = toml! {
             [project]
             name = "test-project"
-            telemetry = false
             [project.override_boot_contracts_source]
             "pox-4" = "./custom-boot-contracts/pox-4.clar"
             "costs" = "./custom-boot-contracts/costs.clar"
@@ -811,7 +814,6 @@ mod tests {
         let manifest_toml = toml! {
             [project]
             name = "test-project"
-            telemetry = false
             [project.override_boot_contracts_source]
             "pox-4" = "./custom-boot-contracts/pox-4.clar"
             "pox-x" = "./custom-boot-contracts/pox-x.clar"
@@ -853,7 +855,6 @@ mod tests {
         let manifest_toml = toml! {
             [project]
             name = "test-project"
-            telemetry = false
             [project.override_boot_contracts_source]
             "pox-x" = "./custom-boot-contracts/pox-x.clar"
         };

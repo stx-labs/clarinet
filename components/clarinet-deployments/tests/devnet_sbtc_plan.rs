@@ -31,7 +31,6 @@ fn write_project(root: &Path, requirements: &[&str]) {
         name = "devnet-sbtc-test"
         authors = []
         description = ""
-        telemetry = false
         {requirements}
         [contracts.noop]
         path = "contracts/noop.clar"

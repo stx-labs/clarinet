@@ -1,7 +1,6 @@
 [project]
 name = 'invalid'
 description = 'invalid project to test clarinet-sdk'
-telemetry = false
 cache_dir = './.cache'
 requirements = []
 

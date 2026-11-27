@@ -1053,7 +1053,6 @@ mod lsp_tests {
         let manifest_content = indoc! {r#"
             [project]
             name = "test-project"
-            telemetry = false
 
             [project.override_boot_contracts_source]
             "pox-4" = "./custom-boot-contracts/pox-4.clar"

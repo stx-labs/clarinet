@@ -100,7 +100,6 @@ fn write_project(
         name = "boot-remap-requirements-test"
         authors = []
         description = ""
-        telemetry = false
         cache_dir = "./.cache"
         requirements = [{requirement_ids}]
 

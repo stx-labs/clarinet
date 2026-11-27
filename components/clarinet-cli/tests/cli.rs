@@ -52,7 +52,7 @@ fn parse_manifest(project_dir: &Path) -> ProjectManifest {
 fn create_new_project(project_name: &str) -> tempfile::TempDir {
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let status = Command::new(env!("CARGO_BIN_EXE_clarinet"))
-        .args(["new", project_name, "--disable-telemetry"])
+        .args(["new", project_name])
         .current_dir(&temp_dir)
         .status();
     assert!(status.unwrap().success());
@@ -64,14 +64,13 @@ fn test_new_project() {
     let project_name = "test_project";
     let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
     let cmd = Command::new(env!("CARGO_BIN_EXE_clarinet"))
-        .args(["new", project_name, "--disable-telemetry"])
+        .args(["new", project_name])
         .current_dir(&temp_dir)
         .output()
         .expect("Failed to execute clarinet new");
     assert!(cmd.status.success());
 
     let expected_lines = [
-        "Telemetry disabled. Clarinet will not collect any data on this project.",
         "Created directory test_project",
         "Created directory contracts",
         "Created directory settings",

@@ -281,7 +281,7 @@ jobs:
           sudo apt-get install -y musl-tools
 
       - name: Build - Cargo
-        run: cargo build --release --features=telemetry --locked --target "${{ matrix.target }}"
+        run: cargo build --release --locked --target "${{ matrix.target }}"
 
       - name: Upload unsigned Windows binary for SignPath
         id: upload-unsigned-windows

@@ -16,7 +16,6 @@ fn test_override_boot_contracts() {
 name = "test-project"
 authors = []
 description = "Test project for boot contract override"
-telemetry = false
 
 [project.override_boot_contracts_source]
 pox-4 = "{}"

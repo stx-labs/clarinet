@@ -1,7 +1,6 @@
 [project]
 name = 'fixtures'
 description = 'test setting epoch to "latest"'
-telemetry = false
 cache_dir = './.cache'
 requirements = []
 
