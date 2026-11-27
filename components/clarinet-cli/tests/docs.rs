@@ -149,11 +149,21 @@ fn stops_quietly_when_the_reader_closes_the_pipe() {
         .skip(1)
         .filter(|line| !line.is_empty() && !line.starts_with("## "))
         .collect();
-    let temp_dir = tempfile::tempdir().unwrap();
+    // A home of its own, so the user's rc file and a pending update notice can't write to stderr
+    let home = tempfile::tempdir().unwrap();
+    let config_dir = home.path().join(".clarinet");
+    std::fs::create_dir(&config_dir).unwrap();
+    std::fs::write(
+        config_dir.join(".latest_version"),
+        env!("CARGO_PKG_VERSION"),
+    )
+    .unwrap();
     let mut child = Command::new(env!("CARGO_BIN_EXE_clarinet"))
         .args(["docs", "--"])
         .args(&names)
-        .current_dir(temp_dir.path())
+        .current_dir(home.path())
+        .env("HOME", home.path())
+        .env("USERPROFILE", home.path())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
