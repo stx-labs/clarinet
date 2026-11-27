@@ -37,6 +37,7 @@ use clarity_repl::analysis::linter::{LintGroup, LintName};
 use clarity_repl::analysis::LintDiagnostic;
 use clarity_repl::frontend::Terminal;
 use clarity_repl::repl::diagnostic::output_diagnostic;
+use clarity_repl::repl::docs::{self, ClarityVersions};
 use clarity_repl::repl::settings::{ApiUrl, RemoteDataSettings};
 use clarity_repl::repl::{
     clarity_version_to_u8, ClarityCodeSource, ClarityContract, ContractDeployer, Epoch,
@@ -106,6 +107,9 @@ enum Command {
     /// Load contracts in a REPL for an interactive session
     #[clap(name = "console", aliases = &["poke"], bin_name = "console")]
     Console(Console),
+    /// Display Clarity documentation for native functions and keywords
+    #[clap(name = "docs", bin_name = "docs")]
+    Docs(Docs),
     /// Run syntax checking, type checking, and lints on contracts
     #[clap(name = "check", bin_name = "check")]
     Check(Check),
@@ -493,6 +497,24 @@ struct ApplyDeployment {
         conflicts_with = "use_on_disk_deployment_plan"
     )]
     pub use_computed_deployment_plan: bool,
+}
+
+#[derive(Parser, PartialEq, Clone, Debug)]
+#[clap(
+    after_help = "Examples:\n  clarinet docs\n  clarinet docs -c 3\n  clarinet docs --clarity-version all\n  clarinet docs 'as-contract?' with-stx"
+)]
+struct Docs {
+    /// Functions or keywords to describe; lists them all when omitted
+    #[clap(value_name = "NAME")]
+    pub names: Vec<String>,
+    /// Clarity version to list: a number (`3`), a name (`clarity3`) or `all` [default: the version new contracts use]
+    #[clap(
+        long = "clarity-version",
+        short = 'c',
+        value_name = "VERSION",
+        conflicts_with = "names"
+    )]
+    pub clarity_version: Option<ClarityVersions>,
 }
 
 #[derive(Parser, PartialEq, Clone, Debug)]
@@ -1060,6 +1082,7 @@ pub fn main() {
                 }
             }
         },
+        Command::Docs(cmd) => display_docs(cmd),
         Command::Console(cmd) => {
             let interactive = cmd.eval.is_empty();
             let mut expressions = cmd.eval.iter();
@@ -1512,6 +1535,60 @@ pub fn main() {
     };
 
     update_check::print_update_message(update_handle);
+}
+
+fn display_docs(
+    Docs {
+        names,
+        clarity_version,
+    }: Docs,
+) {
+    if names.is_empty() {
+        let versions = clarity_version.unwrap_or_default();
+        let functions: Vec<_> = docs::functions_index(versions).collect();
+        let keywords: Vec<_> = docs::keywords_index(versions).collect();
+        print_stdout(&format!(
+            "Functions and keywords in {versions} (`--clarity-version <version|all>` to list another version)\n\n## Functions\n{}\n\n## Keywords\n{}",
+            functions.join("\n"),
+            keywords.join("\n")
+        ));
+        return;
+    }
+
+    let mut entries = vec![];
+    let mut missing = vec![];
+    for name in &names {
+        match docs::describe(name) {
+            Some(doc) => entries.push(doc),
+            None => missing.push(name),
+        }
+    }
+    if !entries.is_empty() {
+        print_stdout(&entries.join("\n\n"));
+    }
+    if !missing.is_empty() {
+        for name in missing {
+            eprintln!(
+                "{}",
+                format_err!(format!("no documentation found for '{name}'"))
+            );
+        }
+        std::process::exit(1);
+    }
+}
+
+/// Unlike `println!`, doesn't panic when the reader closes the pipe (`clarinet docs | head`).
+fn print_stdout(text: &str) {
+    use std::io::Write;
+    if let Err(err) = writeln!(std::io::stdout().lock(), "{text}") {
+        if err.kind() != std::io::ErrorKind::BrokenPipe {
+            eprintln!(
+                "{}",
+                format_err!(format!("failed to write to stdout: {err}"))
+            );
+            std::process::exit(1);
+        }
+    }
 }
 
 fn print_available_lints(settings: &analysis::Settings) {

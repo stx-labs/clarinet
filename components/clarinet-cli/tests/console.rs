@@ -1,6 +1,8 @@
 use std::io::Write;
 use std::process::{Command, Stdio};
 
+use clarinet_defaults::DEFAULT_CLARITY_VERSION;
+
 fn mock_remote_node(network_id: u32, height: u32) -> mockito::ServerGuard {
     let mut server = mockito::Server::new();
 
@@ -409,5 +411,82 @@ fn eval_routes_cost_warnings_and_honors_toggles() {
     assert!(
         stdout.ends_with("Always show costs: false\nAlways show timings: false\n4\n"),
         "{stdout}"
+    );
+}
+
+#[test]
+fn displays_clarity_docs() {
+    let output = run_console_command(
+        &[],
+        &[
+            "::describe tx-sender",
+            "::describe +",
+            "::describe <= (less than or equal)",
+            "::describe not-a-clarity-name",
+            "::describe block-height",
+        ],
+    )
+    .join("\n");
+    assert!(
+        output.starts_with("# tx-sender\n## Clarity version\nAvailable since Clarity 1\n\n## Description\nReturns the original sender of the current transaction"),
+        "{output}"
+    );
+    assert!(
+        output.contains(
+            "\n## Usage\n```clarity\n(+ i1 i2...)\n```\n\n## Clarity version\nAvailable since Clarity 1\n"
+        ),
+        "{output}"
+    );
+    assert!(
+        output.contains("\n## Usage\n```clarity\n(<= i1 i2)\n```\n"),
+        "{output}"
+    );
+    assert!(
+        output.contains("\nIt looks like there aren't matches for your search\n# block-height\n## Clarity version\nAvailable since Clarity 1 through Clarity 2\n"),
+        "{output}"
+    );
+}
+
+#[test]
+fn lists_clarity_functions_and_keywords_by_version() {
+    let output = run_console_command(
+        &[],
+        &[
+            "::keywords",
+            "::functions",
+            "::keywords 1",
+            "::keywords all",
+            "::keywords 0",
+            "::functions::functions 2",
+            "::keywordsall",
+        ],
+    );
+    let headings: Vec<_> = output
+        .iter()
+        .filter(|line| line.starts_with("Keywords in ") || line.starts_with("Native functions in "))
+        .collect();
+    assert_eq!(
+        headings,
+        [
+            &format!("Keywords in {DEFAULT_CLARITY_VERSION} (`::keywords <version|all>` to list another version)"),
+            &format!("Native functions in {DEFAULT_CLARITY_VERSION} (`::functions <version|all>` to list another version)"),
+            "Keywords in Clarity 1 (`::keywords <version|all>` to list another version)",
+            "Keywords in all Clarity versions (`::keywords <version|all>` to list another version)",
+        ]
+    );
+    let output = output.join("\n");
+    assert!(
+        output.contains("\n* (multiply)\n+ (add)\n- (subtract)\n"),
+        "{output}"
+    );
+    assert_eq!(output.matches("\nblock-height\n").count(), 2, "{output}");
+    assert!(
+        output.contains("\ninvalid Clarity version '0', expected one of 1, 2"),
+        "{output}"
+    );
+    assert_eq!(
+        output.matches("Invalid command. Try `::help`").count(),
+        2,
+        "{output}"
     );
 }

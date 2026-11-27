@@ -33,6 +33,8 @@ use crate::analysis::coverage::CoverageHook;
 use crate::analysis::LintDiagnostic;
 use crate::repl::boot;
 use crate::repl::clarity_values::value_to_string;
+#[cfg(not(target_arch = "wasm32"))]
+use crate::repl::docs;
 use crate::repl::hooks::tracer::TracerHook;
 use crate::repl::settings::{Account, LogPrintEvents};
 use crate::utils::serialize_event;
@@ -419,9 +421,16 @@ impl Session {
             "::help" => Ok(self.display_help()),
 
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::functions") => Ok(self.display_functions()),
+            cmd if cmd.split_whitespace().next() == Some("::functions") => display_index(
+                cmd,
+                "::functions",
+                "Native functions",
+                docs::functions_index,
+            ),
             #[cfg(not(target_arch = "wasm32"))]
-            cmd if cmd.starts_with("::keywords") => Ok(self.keywords()),
+            cmd if cmd.split_whitespace().next() == Some("::keywords") => {
+                display_index(cmd, "::keywords", "Keywords", docs::keywords_index)
+            }
             #[cfg(not(target_arch = "wasm32"))]
             cmd if cmd.starts_with("::describe") => self.display_doc(cmd),
             #[cfg(not(target_arch = "wasm32"))]
@@ -1259,12 +1268,12 @@ impl Session {
         #[cfg(not(target_arch = "wasm32"))]
         output.push(format!(
             "{}",
-            "::functions\t\t\t\tDisplay all the native functions available in clarity".yellow()
+            "::functions [version|all]\t\tDisplay the native functions available in a Clarity version".yellow()
         ));
         #[cfg(not(target_arch = "wasm32"))]
         output.push(format!(
             "{}",
-            "::keywords\t\t\t\tDisplay all the native keywords available in clarity".yellow()
+            "::keywords [version|all]\t\tDisplay the native keywords available in a Clarity version".yellow()
         ));
         #[cfg(not(target_arch = "wasm32"))]
         output.push(format!(
@@ -1883,41 +1892,13 @@ impl Session {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn display_functions(&self) -> String {
-        use crate::repl::docs::CLARITY_STD_INDEX;
-        format!("{}", CLARITY_STD_INDEX.join("\n").yellow())
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn keywords(&self) -> String {
-        use crate::repl::docs::CLARITY_KEYWORDS_INDEX;
-        format!("{}", CLARITY_KEYWORDS_INDEX.join("\n").yellow())
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    fn lookup_functions_or_keywords_docs(&self, exp: &str) -> Option<&str> {
-        use crate::repl::docs::{CLARITY_KEYWORDS_REF, CLARITY_STD_REF};
-        CLARITY_STD_REF
-            .get(exp)
-            .or_else(|| CLARITY_KEYWORDS_REF.get(exp))
-            .map(|s| s.as_str())
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
     fn display_doc(&self, command: &str) -> Result<String, String> {
-        let keyword = {
-            let mut s = command.to_string();
-            s = s.replace("::describe", "");
-            s = s.replace(' ', "");
-            s
-        };
-
-        match self.lookup_functions_or_keywords_docs(&keyword) {
-            Some(doc) => Ok(format!("{}", doc.yellow())),
-            None => Err(format!(
-                "{}",
-                "It looks like there aren't matches for your search".red()
-            )),
+        let keyword = command.trim_start_matches("::describe").trim();
+        match docs::describe(keyword) {
+            Some(doc) => Ok(doc.as_str().yellow().to_string()),
+            None => Err("It looks like there aren't matches for your search"
+                .red()
+                .to_string()),
         }
     }
 
@@ -1934,6 +1915,24 @@ impl Session {
             perf_hook.clear_buffer();
         }
     }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn display_index<I: Iterator<Item = &'static str>>(
+    command: &str,
+    prefix: &str,
+    title: &str,
+    index: fn(docs::ClarityVersions) -> I,
+) -> Result<String, String> {
+    let versions = match command.strip_prefix(prefix).unwrap_or_default().trim() {
+        "" => docs::ClarityVersions::default(),
+        args => args.parse().map_err(|err: String| err.red().to_string())?,
+    };
+    let names: Vec<_> = index(versions).collect();
+    Ok(format!(
+        "{title} in {versions} (`{prefix} <version|all>` to list another version)\n{}",
+        names.join("\n").yellow()
+    ))
 }
 
 #[derive(Debug, PartialEq)]
